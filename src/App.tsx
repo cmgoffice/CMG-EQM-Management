@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   LayoutDashboard,
   Truck,
@@ -282,6 +282,22 @@ const ReportDetailModal = ({ report, onClose, vehicleName, projectName }: { repo
             )}
           </div>
 
+          {/* ผู้ส่งรายงาน & เลขไมล์/ชม. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">ผู้ส่งรายงาน</label>
+              <div className="bg-slate-50 border border-slate-100 px-3 py-2 rounded-lg text-slate-700 font-medium">
+                {(report as any).submittedByName || "-"}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">เลขไมล์ / เลขชั่วโมง</label>
+              <div className="bg-slate-50 border border-slate-100 px-3 py-2 rounded-lg text-slate-700 font-medium">
+                {(report as any).mileageOrHours || "-"}
+              </div>
+            </div>
+          </div>
+
           {/* Details */}
           <div className="space-y-4">
             <div>
@@ -418,6 +434,8 @@ interface Driver {
   [key: string]: any;
 }
 
+const DELETE_REPORT_CODE = "123456";
+
 // --- DAILY REPORT VIEW (stable component so form state is not lost when Firebase updates) ---
 interface DailyReportViewProps {
   dailyReports: DailyReport[];
@@ -426,6 +444,7 @@ interface DailyReportViewProps {
   user: User | null;
   addData: (c: string, d: any) => Promise<void>;
   updateData: (c: string, id: string, d: any) => Promise<void>;
+  deleteData: (c: string, id: string) => Promise<void>;
   logActivity: (a: string, d: string) => Promise<void>;
   getVehicleName: (id: string) => string;
   getProjectName: (id: string) => string;
@@ -439,6 +458,7 @@ function DailyReportViewInner({
   user,
   addData,
   updateData,
+  deleteData,
   logActivity,
   getVehicleName,
   getProjectName,
@@ -460,6 +480,18 @@ function DailyReportViewInner({
     fuelLiters: 0,
     mileageOrHours: "",
   });
+  const reportFormRef = useRef(reportForm);
+
+  const getReportForm = () => (isModalOpen ? reportFormRef.current : reportForm);
+
+  const setReportFormField = (update: Partial<typeof reportForm>) => {
+    const next = { ...reportFormRef.current, ...update };
+    reportFormRef.current = next;
+    if (isModalOpen) setReportForm(next);
+  };
+
+  const [reportToDelete, setReportToDelete] = useState<DailyReport | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
 
   const [breakdownForm, setBreakdownForm] = useState({
     projectId: "",
@@ -476,7 +508,7 @@ function DailyReportViewInner({
       setEditingReport(report);
       setSelectedProjectId(report.projectId);
       setSelectedVehicleId(report.vehicleId);
-      setReportForm({
+      const initial = {
         date: report.date,
         location: report.location,
         startTime: report.startTime || "",
@@ -486,10 +518,14 @@ function DailyReportViewInner({
         photo: report.photo || "",
         fuelLiters: report.fuelLiters || 0,
         mileageOrHours: (report as any).mileageOrHours || "",
-      });
+      };
+      reportFormRef.current = initial;
+      setReportForm(initial);
     } else {
       setEditingReport(null);
-      setReportForm({
+      setSelectedProjectId("");
+      setSelectedVehicleId("");
+      const initial = {
         date: new Date().toISOString().split("T")[0],
         location: "",
         startTime: "",
@@ -499,9 +535,9 @@ function DailyReportViewInner({
         photo: "",
         fuelLiters: 0,
         mileageOrHours: "",
-      });
-      setSelectedProjectId("");
-      setSelectedVehicleId("");
+      };
+      reportFormRef.current = initial;
+      setReportForm(initial);
     }
     setIsModalOpen(true);
   };
@@ -524,6 +560,13 @@ function DailyReportViewInner({
     return vehicles.filter((v) => getVehicleProjectIds(v).includes(selectedProjectId));
   }, [selectedProjectId, vehicles]);
 
+  const displayReports = useMemo(() => {
+    if (!user) return [];
+    if (user.role === "Admin") return dailyReports;
+    const key = user.empId || user.id || "";
+    return dailyReports.filter((r: any) => (r.submittedBy === key));
+  }, [dailyReports, user]);
+
   const breakdownVehicles = useMemo(() => {
     if (!breakdownForm.projectId) return [];
     return vehicles.filter((v) => getVehicleProjectIds(v).includes(breakdownForm.projectId));
@@ -531,20 +574,21 @@ function DailyReportViewInner({
 
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const form = getReportForm();
     if (
       !selectedProjectId ||
       !selectedVehicleId ||
-      !reportForm.location ||
-      !reportForm.startTime ||
-      !reportForm.endTime ||
-      !reportForm.workDetails
+      !form.location ||
+      !form.startTime ||
+      !form.endTime ||
+      !form.workDetails
     )
       return alert("กรุณากรอกข้อมูลสำคัญให้ครบถ้วน");
 
     let totalHours = 0;
-    if (reportForm.startTime && reportForm.endTime) {
-      const [startH, startM] = reportForm.startTime.split(":").map(Number);
-      const [endH, endM] = reportForm.endTime.split(":").map(Number);
+    if (form.startTime && form.endTime) {
+      const [startH, startM] = form.startTime.split(":").map(Number);
+      const [endH, endM] = form.endTime.split(":").map(Number);
       let start = startH + startM / 60;
       let end = endH + endM / 60;
       if (end < start) end += 24;
@@ -566,7 +610,7 @@ function DailyReportViewInner({
       distance: 0,
       submittedBy: user?.empId || user?.id || "",
       submittedByName: user?.name || "",
-      ...reportForm,
+      ...form,
     };
 
     if (editingReport && editingReport.id) {
@@ -618,10 +662,7 @@ function DailyReportViewInner({
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setReportForm({
-        ...reportForm,
-        photo: "https://placehold.co/600x400/png?text=Mock+Image",
-      });
+      setReportFormField({ photo: "https://placehold.co/600x400/png?text=Mock+Image" });
       alert("อัพโหลดรูปภาพจำลองสำเร็จ (Mock Upload)");
     }
   };
@@ -671,12 +712,14 @@ function DailyReportViewInner({
                 <th className="px-1 py-1 text-xs">โครงการ / รถ</th>
                 <th className="px-1 py-1 text-xs">เวลา</th>
                 <th className="px-1 py-1 text-xs">รายละเอียด</th>
-                <th className="px-1 py-1 text-xs text-center">น้ำมัน</th>
+                <th className="px-1 py-1 text-center text-xs">น้ำมัน</th>
+                <th className="px-1 py-1 text-center text-xs">เลขไมล์/ชม.</th>
+                <th className="px-1 py-1 text-xs">ผู้ส่งรายงาน</th>
                 <th className="px-1 py-1 text-xs text-center">จัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {dailyReports.map((r) => (
+              {displayReports.map((r) => (
                 <tr
                   key={r.id}
                   onClick={() => setViewReport(r)}
@@ -716,25 +759,41 @@ function DailyReportViewInner({
                       return `${fuelValue.toFixed(1)} ล.`;
                     })()}
                   </td>
+                  <td className="px-1 py-1 text-center text-xs text-slate-700">
+                    {(r as any).mileageOrHours || "-"}
+                  </td>
+                  <td className="px-1 py-1 text-xs text-slate-700">
+                    {(r as any).submittedByName || "-"}
+                  </td>
                   <td
                     className="px-1 py-1 text-center"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {user?.role === "Admin" && (
-                      <button
-                        onClick={() => openModal(r)}
-                        className="p-0.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                      >
-                        <Pencil size={12} />
-                      </button>
+                      <span className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => openModal(r)}
+                          className="p-0.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                          title="แก้ไข"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => setReportToDelete(r)}
+                          className="p-0.5 text-red-600 hover:bg-red-100 rounded transition-colors"
+                          title="ลบ"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
               ))}
-              {dailyReports.length === 0 && (
+              {displayReports.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-1 py-2 text-center text-slate-400 text-xs">
-                    ไม่มีข้อมูล
+                  <td colSpan={8} className="px-1 py-2 text-center text-slate-400 text-xs">
+                    {user?.role === "Admin" ? "ไม่มีข้อมูล" : "ยังไม่มีรายงานที่คุณส่ง"}
                   </td>
                 </tr>
               )}
@@ -794,10 +853,9 @@ function DailyReportViewInner({
                     className="input-field"
                     value={selectedVehicleId}
                     onChange={(e) => setSelectedVehicleId(e.target.value)}
-                    disabled={!selectedProjectId}
                   >
-                    <option value="">-- เลือกรถ --</option>
-                    {filteredVehicles.map((v) => (
+                    <option value="">-- เลือกรถ (ทุกคัน) --</option>
+                    {vehicles.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.plate} : {v.type}
                       </option>
@@ -811,7 +869,7 @@ function DailyReportViewInner({
                   <input
                     type="date"
                     className="input-field bg-slate-100 text-slate-500"
-                    value={reportForm.date}
+                    value={getReportForm().date}
                     disabled
                   />
                 </div>
@@ -822,13 +880,8 @@ function DailyReportViewInner({
                   <input
                     type="text"
                     className="input-field"
-                    value={reportForm.location}
-                    onChange={(e) =>
-                      setReportForm({
-                        ...reportForm,
-                        location: e.target.value,
-                      })
-                    }
+                    value={getReportForm().location}
+                    onChange={(e) => setReportFormField({ location: e.target.value })}
                   />
                 </div>
               </div>
@@ -841,13 +894,8 @@ function DailyReportViewInner({
                   <input
                     type="time"
                     className="input-field"
-                    value={reportForm.startTime}
-                    onChange={(e) =>
-                      setReportForm({
-                        ...reportForm,
-                        startTime: e.target.value,
-                      })
-                    }
+                    value={getReportForm().startTime}
+                    onChange={(e) => setReportFormField({ startTime: e.target.value })}
                   />
                 </div>
                 <div>
@@ -857,13 +905,8 @@ function DailyReportViewInner({
                   <input
                     type="time"
                     className="input-field"
-                    value={reportForm.endTime}
-                    onChange={(e) =>
-                      setReportForm({
-                        ...reportForm,
-                        endTime: e.target.value,
-                      })
-                    }
+                    value={getReportForm().endTime}
+                    onChange={(e) => setReportFormField({ endTime: e.target.value })}
                   />
                 </div>
               </div>
@@ -879,12 +922,9 @@ function DailyReportViewInner({
                   <input
                     type="number"
                     className="input-field"
-                    value={reportForm.fuelLiters}
+                    value={getReportForm().fuelLiters}
                     onChange={(e) =>
-                      setReportForm({
-                        ...reportForm,
-                        fuelLiters: parseFloat(e.target.value) || 0,
-                      })
+                      setReportFormField({ fuelLiters: parseFloat(e.target.value) || 0 })
                     }
                     placeholder="0"
                   />
@@ -895,13 +935,8 @@ function DailyReportViewInner({
                     type="text"
                     className="input-field"
                     placeholder="ระบุเลขไมล์หรือชั่วโมงทำงาน"
-                    value={reportForm.mileageOrHours || ""}
-                    onChange={(e) =>
-                      setReportForm({
-                        ...reportForm,
-                        mileageOrHours: e.target.value,
-                      })
-                    }
+                    value={getReportForm().mileageOrHours || ""}
+                    onChange={(e) => setReportFormField({ mileageOrHours: e.target.value })}
                   />
                 </div>
               </div>
@@ -912,13 +947,8 @@ function DailyReportViewInner({
                 </label>
                 <textarea
                   className="input-field h-32"
-                  value={reportForm.workDetails}
-                  onChange={(e) =>
-                    setReportForm({
-                      ...reportForm,
-                      workDetails: e.target.value,
-                    })
-                  }
+                  value={getReportForm().workDetails}
+                  onChange={(e) => setReportFormField({ workDetails: e.target.value })}
                 ></textarea>
               </div>
               <div>
@@ -926,10 +956,8 @@ function DailyReportViewInner({
                 <input
                   type="text"
                   className="input-field"
-                  value={reportForm.problem}
-                  onChange={(e) =>
-                    setReportForm({ ...reportForm, problem: e.target.value })
-                  }
+                  value={getReportForm().problem}
+                  onChange={(e) => setReportFormField({ problem: e.target.value })}
                 />
               </div>
               <div>
@@ -944,9 +972,9 @@ function DailyReportViewInner({
                   <div className="flex flex-col items-center gap-2 text-slate-500">
                     <Camera size={32} className="text-blue-400" />
                     <span>
-                      {reportForm.photo ? "เปลี่ยนรูปภาพ" : "อัพโหลดรูปภาพ"}
+                      {getReportForm().photo ? "เปลี่ยนรูปภาพ" : "อัพโหลดรูปภาพ"}
                     </span>
-                    {reportForm.photo && (
+                    {getReportForm().photo && (
                       <span className="text-green-600 text-sm font-medium">
                         ✅ มีรูปภาพแล้ว
                       </span>
@@ -967,6 +995,66 @@ function DailyReportViewInner({
                 className="btn-primary shadow-lg shadow-blue-600/20"
               >
                 บันทึก
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {reportToDelete && (
+        <div className="fixed inset-0 z-[9999] animate-fade-in backdrop-blur-sm bg-black/40 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md shadow-2xl border-0">
+            <div className="p-6 border-b border-slate-100">
+              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <div className="bg-red-100 p-2 rounded-lg text-red-600">
+                  <Trash2 size={24} />
+                </div>
+                ลบรายการบันทึกประจำวัน
+              </h3>
+              <p className="text-slate-600 text-sm mt-2">
+                รายงานวันที่ {reportToDelete.date} – {getVehicleName(reportToDelete.vehicleId)} ({getProjectName(reportToDelete.projectId)})
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <label className="label">กรอกรหัสยืนยัน (123456)</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                className="input-field"
+                placeholder="กรอกรหัส 123456"
+                value={deleteConfirmCode}
+                onChange={(e) => setDeleteConfirmCode(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="p-6 border-t bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setReportToDelete(null);
+                  setDeleteConfirmCode("");
+                }}
+                className="btn-secondary"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (deleteConfirmCode !== DELETE_REPORT_CODE) {
+                    alert("รหัสไม่ถูกต้อง กรุณากรอก 123456");
+                    return;
+                  }
+                  if (!reportToDelete.id) return;
+                  await deleteData("daily_reports", reportToDelete.id);
+                  logActivity("Delete Daily Report", `Deleted report ${reportToDelete.date} - ${getVehicleName(reportToDelete.vehicleId)}`);
+                  setReportToDelete(null);
+                  setDeleteConfirmCode("");
+                  setViewReport(null);
+                }}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-semibold transition-colors"
+              >
+                ลบรายการ
               </button>
             </div>
           </Card>
@@ -2097,23 +2185,52 @@ export default function App() {
 
   const DashboardView = () => {
     const [filterJob, setFilterJob] = useState("all");
+    const isDriverView = user?.role === "Driver";
+
+    const driverScopedData = useMemo(() => {
+      if (!isDriverView || !user) return null;
+      const key = user.empId || user.id || "";
+      const reports = dailyReports.filter((r: any) => r.submittedBy === key);
+      const vIds = reports.map((r) => r.vehicleId).filter((id): id is string => Boolean(id));
+      const vehicleIds = vIds.filter((id, i) => vIds.indexOf(id) === i);
+      const pIds = reports.map((r) => r.projectId).filter((id): id is string => Boolean(id));
+      const projectIds = pIds.filter((id, i) => pIds.indexOf(id) === i);
+      const scopeVehicles = vehicles.filter((v) => vehicleIds.includes(v.id));
+      return { reports, vehicleIds, projectIds, scopeVehicles };
+    }, [isDriverView, user, dailyReports, vehicles]);
+
+    // รายงานที่ใช้ใน Dashboard: คนขับเห็นแค่ของตนเอง, Admin เห็นทั้งหมด (แล้วกรองโครงการถ้าเลือก)
+    const scopeReports = useMemo(() => {
+      if (isDriverView && driverScopedData) {
+        const reports = driverScopedData.reports;
+        if (filterJob === "all") return reports;
+        return reports.filter((r) => r.projectId === filterJob);
+      }
+      if (filterJob === "all") return dailyReports;
+      return dailyReports.filter((r) => r.projectId === filterJob);
+    }, [isDriverView, driverScopedData, filterJob, dailyReports]);
+
+    const scopeVehicles = useMemo(() => {
+      if (isDriverView && driverScopedData) {
+        const reports = filterJob === "all" ? driverScopedData.reports : driverScopedData.reports.filter((r) => r.projectId === filterJob);
+        const rawIds = reports.map((r) => r.vehicleId).filter((id): id is string => Boolean(id));
+        const ids = rawIds.filter((id, i) => rawIds.indexOf(id) === i);
+        return vehicles.filter((v) => ids.includes(v.id));
+      }
+      if (filterJob === "all") return vehicles;
+      return vehicles.filter((v) => getVehicleProjectIds(v).includes(filterJob));
+    }, [isDriverView, driverScopedData, filterJob, vehicles]);
+
+    const scopeDrivers = useMemo(() => {
+      if (isDriverView) return 1;
+      const driverNamesInProject = scopeVehicles.map((v) => v.driver).filter((n) => n);
+      return drivers.filter((d) => driverNamesInProject.includes(d.name)).length;
+    }, [isDriverView, scopeVehicles, drivers]);
 
     // Calculation Logic with Enhanced Metrics
     const stats = useMemo(() => {
-      let filteredReports = dailyReports;
-      let filteredVehicles = vehicles;
-      let filteredDrivers = drivers;
-
-      if (filterJob !== "all") {
-        filteredReports = dailyReports.filter((r) => r.projectId === filterJob);
-        filteredVehicles = vehicles.filter((v) => getVehicleProjectIds(v).includes(filterJob));
-        const driverNamesInProject = filteredVehicles
-          .map((v) => v.driver)
-          .filter((n) => n);
-        filteredDrivers = drivers.filter((d) =>
-          driverNamesInProject.includes(d.name)
-        );
-      }
+      const filteredReports = scopeReports;
+      const filteredVehicles = scopeVehicles;
 
       const activeVehicles = filteredVehicles.filter(
         (v) => v.status === "Busy"
@@ -2126,12 +2243,10 @@ export default function App() {
       ).length;
       const totalVehiclesCount = filteredVehicles.length;
 
-      // ฟังก์ชันช่วยในการแปลงค่าน้ำมัน
       const convertFuelToLiters = (fuelValue: any) => {
         if (!fuelValue) return 0;
         const value = typeof fuelValue === 'string' ? parseFloat(fuelValue) : fuelValue;
         if (value > 500) {
-          // ถือว่าเป็นราคาบาท แปลงเป็นลิตร (ราคาดีเซลปัจจุบันประมาณ 35 บาท/ลิตร)
           const dieselPrice = 35;
           return parseFloat((value / dieselPrice).toFixed(1));
         }
@@ -2142,7 +2257,6 @@ export default function App() {
         (acc, curr) => acc + convertFuelToLiters(curr.fuelLiters),
         0
       );
-
       const todayFuel = filteredReports
         .filter((r) => isToday(r.date))
         .reduce((acc, curr) => acc + convertFuelToLiters(curr.fuelLiters), 0);
@@ -2153,35 +2267,41 @@ export default function App() {
         .filter((r) => isThisMonth(r.date))
         .reduce((acc, curr) => acc + convertFuelToLiters(curr.fuelLiters), 0);
 
+      const driverScopedVehicleIds = isDriverView && driverScopedData ? driverScopedData.vehicleIds : null;
       const totalMaintenance = maintenanceLogs.reduce((acc, curr) => {
-        const v = vehicles.find((veh) => veh.id === curr.vehicleId);
-        if (filterJob !== "all" && !getVehicleProjectIds(v).includes(filterJob))
-          return acc;
+        if (driverScopedVehicleIds && !driverScopedVehicleIds.includes(curr.vehicleId)) return acc;
+        if (filterJob !== "all" && !isDriverView) {
+          const v = vehicles.find((veh) => veh.id === curr.vehicleId);
+          if (!v || !getVehicleProjectIds(v).includes(filterJob)) return acc;
+        }
         return acc + (parseFloat(curr.cost) || 0);
       }, 0);
-
-      const driverCount = filteredDrivers.length;
 
       const vehicleTypeStats: Record<string, number> = {};
       filteredVehicles.forEach((v) => {
         vehicleTypeStats[v.type] = (vehicleTypeStats[v.type] || 0) + 1;
       });
 
+      const emptyVehiclesList = filteredVehicles.filter(
+        (v) => v.status === "Ready" && (!v.driver || v.driver === "")
+      );
+
       return {
         activeVehicles,
         maintenanceVehicles,
         emptyVehicles,
+        emptyVehiclesList,
         totalVehiclesCount,
         totalFuel,
         todayFuel,
         weekFuel,
         monthFuel,
         totalMaintenance,
-        driverCount,
+        driverCount: scopeDrivers,
         vehicleTypeStats,
         brokenVehicles: maintenanceVehicles,
       };
-    }, [filterJob, dailyReports, vehicles, maintenanceLogs, drivers]);
+    }, [scopeReports, scopeVehicles, scopeDrivers, filterJob, isDriverView, driverScopedData, maintenanceLogs, drivers]);
 
     const handleAcknowledgeBreakdown = async (report: any) => {
       if (window.confirm("ยืนยันรับเรื่องการแจ้งซ่อมนี้?")) {
@@ -2195,34 +2315,60 @@ export default function App() {
       }
     };
 
+    const driverProjects = isDriverView && driverScopedData
+      ? projects.filter((p) => (p.id != null && driverScopedData.projectIds.includes(p.id)))
+      : projects;
+
     return (
       <div className="space-y-4 p-2 animate-fade-in">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <span className="text-2xl">📊</span>
-            ภาพรวมโครงการ (Dashboard)
+            {isDriverView ? "ภาพรวมของฉัน" : "ภาพรวมโครงการ (Dashboard)"}
           </h2>
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">🔽</span>
-            <select
-              className="input-field max-w-[200px] text-sm py-1.5"
-              value={filterJob}
-              onChange={(e) => setFilterJob(e.target.value)}
-            >
-              <option value="all">ทุกโครงการ</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.jobNo} - {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!isDriverView && (
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">🔽</span>
+              <select
+                className="input-field max-w-[200px] text-sm py-1.5"
+                value={filterJob}
+                onChange={(e) => setFilterJob(e.target.value)}
+              >
+                <option value="all">ทุกโครงการ</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.jobNo} - {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {isDriverView && driverProjects.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">🔽</span>
+              <select
+                className="input-field max-w-[200px] text-sm py-1.5"
+                value={filterJob}
+                onChange={(e) => setFilterJob(e.target.value)}
+              >
+                <option value="all">ทุกโครงการของฉัน</option>
+                {driverProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.jobNo} - {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
+        {isDriverView && (
+          <p className="text-slate-500 text-xs font-medium mb-1">ข้อมูลจากรายงานที่คุณส่งเท่านั้น</p>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="p-3 bg-blue-50/80 border border-blue-100">
             <div className="text-slate-600 text-xs font-medium mb-0.5 flex items-center gap-1">
-              <span>🚗</span> เครื่องจักร/รถ ในโครงการ
+              <span>🚗</span> {isDriverView ? "รถ/เครื่องจักรที่คุณมีรายงาน" : "เครื่องจักร/รถ ในโครงการ"}
             </div>
             <div className="text-xl font-bold text-slate-800">
               {stats.totalVehiclesCount}{" "}
@@ -2298,9 +2444,26 @@ export default function App() {
                   {stats.emptyVehicles}{" "}
                   <span className="text-sm font-normal text-slate-500">คัน</span>
                 </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">ข้อมูลจากทะเบียนรถและเครื่องจักร</p>
               </div>
               <span className="text-2xl opacity-80">🚛</span>
             </div>
+            {stats.emptyVehiclesList && stats.emptyVehiclesList.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-200/80">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase mb-1.5">รายการรถว่าง</p>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                  {stats.emptyVehiclesList.map((v: any) => (
+                    <span
+                      key={v.id}
+                      className="inline-flex items-center gap-1 bg-slate-200/80 text-slate-700 px-2 py-1 rounded text-[10px] font-medium"
+                    >
+                      {v.plate}
+                      <span className="text-slate-400">{v.type}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </Card>
         </div>
 
@@ -2355,7 +2518,7 @@ export default function App() {
                 {stats.driverCount}{" "}
                 <span className="text-xs font-normal text-slate-500">คน</span>
               </p>
-              <p className="text-[10px] text-slate-400 pl-1">ในโครงการที่เลือก</p>
+              <p className="text-[10px] text-slate-400 pl-1">{isDriverView ? "คุณ" : "ในโครงการที่เลือก"}</p>
             </div>
             <div className="pt-4 border-t border-violet-100">
               <div className="flex items-center gap-2 mb-1.5">
@@ -2375,7 +2538,7 @@ export default function App() {
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">📋</span>
             <h3 className="text-sm font-bold text-slate-700">
-              ประเภทเครื่องจักรในโครงการ (Vehicle Types)
+              {isDriverView ? "ประเภทรถ/เครื่องจักรที่คุณมีรายงาน" : "ประเภทเครื่องจักรในโครงการ (Vehicle Types)"}
             </h3>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -2394,16 +2557,16 @@ export default function App() {
             ))}
             {Object.keys(stats.vehicleTypeStats).length === 0 && (
               <div className="col-span-full text-center text-slate-400 text-xs py-2">
-                ไม่มีข้อมูลรถในโครงการนี้
+                {isDriverView ? "ยังไม่มีรายงานที่ส่ง" : "ไม่มีข้อมูลรถในโครงการนี้"}
               </div>
             )}
           </div>
         </Card>
 
-        {/* Recent Activity Table - Compact */}
+        {/* Recent Activity Table - Compact (Admin: ทั้งหมด / Driver: ของตนเอง) */}
         <Card className="p-3">
           <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 text-slate-700">
-            <span>📄</span> รายงานการทำงานล่าสุด (Real-time)
+            <span>📄</span> {isDriverView ? "รายงานการทำงานของฉัน (ล่าสุด)" : "รายงานการทำงานล่าสุด (Real-time)"}
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left border-collapse">
@@ -2418,7 +2581,7 @@ export default function App() {
                 </tr>
               </thead>
               <tbody className="text-slate-700">
-                {dailyReports.slice(0, 15).map((r) => (
+                {scopeReports.slice(0, 15).map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => setViewReport(r)}
@@ -2440,12 +2603,10 @@ export default function App() {
                     </td>
                   </tr>
                 ))}
-                {dailyReports.length === 0 && (
+                {scopeReports.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-2 py-4 text-center text-slate-400 text-xs">
-                      {firebaseUser
-                        ? "ยังไม่มีข้อมูลรายงาน"
-                        : "กรุณาตรวจสอบการเชื่อมต่อ Firebase"}
+                      {isDriverView ? "ยังไม่มีรายงานที่คุณส่ง" : firebaseUser ? "ยังไม่มีข้อมูลรายงาน" : "กรุณาตรวจสอบการเชื่อมต่อ Firebase"}
                     </td>
                   </tr>
                 )}
@@ -2454,12 +2615,12 @@ export default function App() {
           </div>
         </Card>
 
-        {/* Breakdown Reports Section (Admin Only) - Pastel compact */}
-        {user?.role === "Admin" && (
+        {/* Breakdown Reports: Admin เห็นทั้งหมด + จัดการได้, Driver เห็นเฉพาะที่ตนเองแจ้ง (อ่านอย่างเดียว) */}
+        {(user?.role === "Admin" || (user?.role === "Driver" && breakdownReports.some((b: any) => (b.reporterId === (user?.empId || user?.id) || b.reporterName === user?.name)))) && (
           <div className="mt-4 animate-fade-in">
             <Card className="p-4 bg-rose-50/60 border border-rose-100">
               <h3 className="font-bold text-sm text-rose-700 flex items-center gap-2 mb-3">
-                <span>🚨</span> รายการแจ้งรถเสีย (Breakdown Reports)
+                <span>🚨</span> {isDriverView ? "รายการแจ้งรถเสียที่คุณแจ้ง" : "รายการแจ้งรถเสีย (Breakdown Reports)"}
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
@@ -2471,11 +2632,14 @@ export default function App() {
                       <th className="px-2 py-1.5">รถ/ทะเบียน</th>
                       <th className="px-2 py-1.5">อาการเสีย</th>
                       <th className="px-2 py-1.5">สถานะ</th>
-                      <th className="px-2 py-1.5 text-center">จัดการ</th>
+                      {!isDriverView && <th className="px-2 py-1.5 text-center">จัดการ</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-rose-100">
-                    {breakdownReports.map((b) => (
+                    {(isDriverView
+                      ? breakdownReports.filter((b: any) => b.reporterId === (user?.empId || user?.id) || b.reporterName === user?.name)
+                      : breakdownReports
+                    ).map((b) => (
                       <tr key={b.id} className="hover:bg-rose-50/50">
                         <td className="px-2 py-1.5 whitespace-nowrap">{b.date} {b.time}</td>
                         <td className="px-2 py-1.5">{b.reporterName}</td>
@@ -2493,22 +2657,24 @@ export default function App() {
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5 text-center">
-                          {b.status === "New" && (
-                            <button
-                              onClick={() => handleAcknowledgeBreakdown(b)}
-                              className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 mx-auto"
-                            >
-                              <CheckSquare size={12} /> รับทราบ
-                            </button>
-                          )}
-                        </td>
+                        {!isDriverView && (
+                          <td className="px-2 py-1.5 text-center">
+                            {b.status === "New" && (
+                              <button
+                                onClick={() => handleAcknowledgeBreakdown(b)}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 mx-auto"
+                              >
+                                <CheckSquare size={12} /> รับทราบ
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
-                    {breakdownReports.length === 0 && (
+                    {(isDriverView ? breakdownReports.filter((b: any) => b.reporterId === (user?.empId || user?.id) || b.reporterName === user?.name) : breakdownReports).length === 0 && (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={isDriverView ? 6 : 7}
                           className="px-2 py-4 text-center text-slate-400 text-xs"
                         >
                           ไม่มีรายการแจ้งรถเสีย
@@ -3387,67 +3553,56 @@ export default function App() {
             <Plus size={20} /> เพิ่มโครงการ
           </button>
         </div>
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {projects.map((p) => (
-            <div
+            <Card
               key={p.id}
-              className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.05)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 p-6 relative group"
+              className="p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group bg-gradient-to-br from-white to-amber-50/30 border border-amber-100 relative"
             >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="bg-blue-100 text-blue-700 text-sm font-bold px-3 py-1 rounded-lg uppercase tracking-wide">
-                      {p.jobNo}
-                    </div>
+              <div className="flex flex-col items-center text-center">
+                <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-3 border-2 border-white shadow">
+                  <Briefcase size={28} className="text-amber-600" />
+                </div>
+                <div className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-lg uppercase tracking-wide mb-2">
+                  {p.jobNo}
+                </div>
+                <h3 className="font-bold text-sm text-slate-900 mb-2 line-clamp-2 min-h-[2.5rem]" title={p.name || p.projectName}>
+                  {p.name || p.projectName}
+                </h3>
+                <div className="text-xs text-slate-500 flex items-center justify-center gap-1 mb-2 truncate w-full" title={p.location || "ไม่ได้ระบุ"}>
+                  <MapPin size={12} /> {p.location || "-"}
+                </div>
+                <div className="flex gap-3 text-xs border-t border-slate-100 pt-2 w-full justify-center">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block uppercase font-semibold">PM</span>
+                    <span className="font-medium text-slate-700 truncate block max-w-[80px]" title={p.pm || "-"}>{p.pm || "-"}</span>
                   </div>
-                  <h3 className="font-bold text-xl text-slate-900 mb-3">
-                    {p.name}
-                  </h3>
-                  <div className="text-sm text-slate-500 flex items-center gap-2 mb-6">
-                    <MapPin size={16} /> {p.location || "ไม่ได้ระบุ"}
-                  </div>
-                  <div className="flex gap-8 text-sm border-t border-slate-50 pt-4">
-                    <div>
-                      <span className="text-slate-400 text-xs block mb-1 uppercase tracking-wider font-semibold">
-                        PM
-                      </span>
-                      <span className="font-medium text-slate-700 text-base">
-                        {p.pm || "-"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 text-xs block mb-1 uppercase tracking-wider font-semibold">
-                        CM
-                      </span>
-                      <span className="font-medium text-slate-700 text-base">
-                        {p.cm || "-"}
-                      </span>
-                    </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block uppercase font-semibold">CM</span>
+                    <span className="font-medium text-slate-700 truncate block max-w-[80px]" title={p.cm || "-"}>{p.cm || "-"}</span>
                   </div>
                 </div>
-                <div className="flex flex-col gap-3 ml-6">
+                <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => openModal(p)}
-                    className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                   >
-                    <Pencil size={20} />
+                    <Pencil size={16} />
                   </button>
                   <button
                     onClick={(e) => p.id && handleDelete(p.id, e)}
-                    className="p-3 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors z-10"
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                   >
-                    <Trash2 size={20} />
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
           {projects.length === 0 && (
             <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
               <Briefcase className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-              <p className="text-slate-500 font-medium">
-                ยังไม่มีข้อมูลโครงการ
-              </p>
+              <p className="text-slate-500 font-medium">ยังไม่มีข้อมูลโครงการ</p>
             </div>
           )}
         </div>
@@ -3620,54 +3775,49 @@ export default function App() {
             <p className="text-slate-500 font-medium">ยังไม่มีข้อมูลคนขับรถ</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {driverUsers.map((u) => (
               <Card
                 key={u.id}
-                className="p-6 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group bg-gradient-to-br from-white to-blue-50/30 border border-blue-100"
+                className="p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group bg-gradient-to-br from-white to-blue-50/30 border border-blue-100"
               >
                 <div className="flex flex-col items-center text-center">
-                  <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center overflow-hidden border-2 border-white shadow-lg mb-4">
-                    <User size={40} className="text-blue-600" />
+                  <div className="w-14 h-14 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center overflow-hidden border-2 border-white shadow mb-3">
+                    <User size={28} className="text-blue-600" />
                   </div>
-                  <h3 className="font-bold text-lg text-slate-900 mb-2">
+                  <h3 className="font-bold text-sm text-slate-900 mb-1 truncate w-full">
                     {u.name}
                   </h3>
-                  <div className="text-sm text-slate-600 flex items-center gap-2 mb-2">
-                    <User size={14} /> {u.empId}
+                  <div className="text-xs text-slate-600 flex items-center justify-center gap-1 mb-1">
+                    <User size={12} /> {u.empId}
                   </div>
-                  <div className="text-sm text-slate-500 flex items-center gap-2 mb-3">
-                    <Mail size={14} /> {u.email || "-"}
+                  <div className="text-xs text-slate-500 truncate w-full mb-2" title={u.email || "-"}>
+                    {u.email || "-"}
                   </div>
-                  
-                  {/* แสดงโครงการและรถที่ขับ */}
                   {u.projectId && (
-                    <div className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full mb-2 font-medium">
+                    <div className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full mb-1 font-medium truncate w-full" title={projects.find(p => p.id === u.projectId)?.name || projects.find(p => p.id === u.projectId)?.projectName || "-"}>
                       🏗️ {projects.find(p => p.id === u.projectId)?.name || projects.find(p => p.id === u.projectId)?.projectName || "-"}
                     </div>
                   )}
-                  {/* แสดงรถหลายคัน */}
                   {u.vehicleIds && u.vehicleIds.length > 0 ? (
-                    <div className="space-y-1 mb-3">
-                      {u.vehicleIds.map((vId) => {
+                    <div className="flex flex-wrap gap-0.5 justify-center mb-2">
+                      {u.vehicleIds.slice(0, 3).map((vId) => {
                         const vehicle = vehicles.find(v => v.id === vId);
                         return vehicle ? (
-                          <div key={vId} className="text-xs bg-orange-100 text-orange-700 px-3 py-1 rounded-full font-medium">
+                          <span key={vId} className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">
                             🚗 {vehicle.plate}
-                          </div>
+                          </span>
                         ) : null;
                       })}
+                      {u.vehicleIds.length > 3 && <span className="text-[10px] text-slate-400">+{u.vehicleIds.length - 3}</span>}
                     </div>
                   ) : u.vehicleId && (
-                    <div className="text-xs bg-orange-100 text-orange-700 px-3 py-1 rounded-full mb-3 font-medium">
+                    <div className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full mb-2 font-medium">
                       🚗 {vehicles.find(v => v.id === u.vehicleId)?.plate || "-"}
                     </div>
                   )}
-                  
-                  <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit font-medium">
-                    {u.status === "Approved"
-                      ? "✅ อนุมัติแล้ว"
-                      : "⏳ รออนุมัติ"}
+                  <div className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit font-medium">
+                    {u.status === "Approved" ? "✅ อนุมัติ" : "⏳ รอ"}
                   </div>
                 </div>
               </Card>
@@ -3771,7 +3921,7 @@ export default function App() {
         </div>
 
         <div className="flex overflow-x-auto px-6 py-2 gap-2 bg-white border-t border-slate-100 scrollbar-hide">
-          {user.role === "Admin" && (
+          {(user.role === "Admin" || user.role === "Driver") && (
             <NavButton
               icon={LayoutDashboard}
               label="ภาพรวม"
@@ -3788,34 +3938,38 @@ export default function App() {
             onClick={() => setActiveTab("daily")}
             activeBg="bg-blue-600 text-white shadow-lg shadow-blue-600/25"
           />
-          <NavButton
-            icon={Truck}
-            label="ทะเบียนรถ"
-            active={activeTab === "fleet"}
-            onClick={() => setActiveTab("fleet")}
-            activeBg="bg-emerald-600 text-white shadow-lg shadow-emerald-600/25"
-          />
-          <NavButton
-            icon={Briefcase}
-            label="โครงการ"
-            active={activeTab === "projects"}
-            onClick={() => setActiveTab("projects")}
-            activeBg="bg-amber-600 text-white shadow-lg shadow-amber-600/25"
-          />
-          <NavButton
-            icon={Wrench}
-            label="ซ่อมบำรุง"
-            active={activeTab === "maintenance"}
-            onClick={() => setActiveTab("maintenance")}
-            activeBg="bg-orange-600 text-white shadow-lg shadow-orange-600/25"
-          />
-          <NavButton
-            icon={User}
-            label="คนขับ"
-            active={activeTab === "drivers"}
-            onClick={() => setActiveTab("drivers")}
-            activeBg="bg-violet-600 text-white shadow-lg shadow-violet-600/25"
-          />
+          {user.role !== "Driver" && (
+            <>
+              <NavButton
+                icon={Truck}
+                label="ทะเบียนรถ"
+                active={activeTab === "fleet"}
+                onClick={() => setActiveTab("fleet")}
+                activeBg="bg-emerald-600 text-white shadow-lg shadow-emerald-600/25"
+              />
+              <NavButton
+                icon={Briefcase}
+                label="โครงการ"
+                active={activeTab === "projects"}
+                onClick={() => setActiveTab("projects")}
+                activeBg="bg-amber-600 text-white shadow-lg shadow-amber-600/25"
+              />
+              <NavButton
+                icon={Wrench}
+                label="ซ่อมบำรุง"
+                active={activeTab === "maintenance"}
+                onClick={() => setActiveTab("maintenance")}
+                activeBg="bg-orange-600 text-white shadow-lg shadow-orange-600/25"
+              />
+              <NavButton
+                icon={User}
+                label="คนขับ"
+                active={activeTab === "drivers"}
+                onClick={() => setActiveTab("drivers")}
+                activeBg="bg-violet-600 text-white shadow-lg shadow-violet-600/25"
+              />
+            </>
+          )}
           {user.role === "Admin" && (
             <NavButton
               icon={Shield}
@@ -3831,17 +3985,19 @@ export default function App() {
 
       <main className="flex-1 overflow-auto bg-slate-50 p-4 md:p-8">
         <div className="max-w-7xl mx-auto animate-fade-in">
-          {activeTab === "dashboard" && user.role === "Admin" && (
+          {activeTab === "dashboard" && (user.role === "Admin" || user.role === "Driver") && (
             <DashboardView />
           )}
           {activeTab === "daily" && (
             <DailyReportViewInner
+              key="daily-report-view"
               dailyReports={dailyReports}
               vehicles={vehicles}
               projects={projects}
               user={user}
               addData={addData}
               updateData={updateData}
+              deleteData={deleteData}
               logActivity={logActivity}
               getVehicleName={getVehicleName}
               getProjectName={getProjectName}
