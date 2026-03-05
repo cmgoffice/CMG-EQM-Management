@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "cmg-equipment-supervisor"
+  },
+  "targets": {
+    "cmg-equipment-supervisor": {
+      "hosting": {
+        "site-02": [
+          "cmgeqmmanagement"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
