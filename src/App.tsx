@@ -64,6 +64,7 @@ import {
   getDocs,
 } from "firebase/firestore";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
@@ -80,6 +81,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 const appId = "cmg-equipment-supervisor";
 
 // --- CONSTANTS ---
@@ -237,7 +239,15 @@ const isThisMonth = (dateString: string) => {
 // --- MODALS ---
 
 const ReportDetailModal = ({ report, onClose, vehicleName, projectName }: { report: DailyReport; onClose: () => void; vehicleName: string; projectName: string }) => {
+  const [modalLightboxIdx, setModalLightboxIdx] = useState<number | null>(null);
   if (!report) return null;
+
+  const allPhotos: string[] = report.photos && report.photos.length > 0
+    ? report.photos
+    : report.photo ? [report.photo] : [];
+
+  const prevModalPhoto = () => setModalLightboxIdx((i) => i !== null ? (i - 1 + allPhotos.length) % allPhotos.length : null);
+  const nextModalPhoto = () => setModalLightboxIdx((i) => i !== null ? (i + 1) % allPhotos.length : null);
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[100] animate-fade-in backdrop-blur-sm">
@@ -339,27 +349,27 @@ const ReportDetailModal = ({ report, onClose, vehicleName, projectName }: { repo
             )}
           </div>
 
-          {/* Photo */}
+          {/* Photos */}
           <div>
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">
-              รูปภาพหน้างาน
+              รูปภาพหน้างาน {allPhotos.length > 0 && <span className="text-blue-500 normal-case font-normal">({allPhotos.length} รูป)</span>}
             </label>
-            {report.photo ? (
-              <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-                <img
-                  src={
-                    report.photo.includes("http")
-                      ? report.photo
-                      : "https://placehold.co/600x400/e2e8f0/64748b?text=Uploaded+Image"
-                  }
-                  alt="Site Work"
-                  className="w-full h-auto object-cover"
-                />
+            {allPhotos.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {allPhotos.map((url, idx) => (
+                  <div
+                    key={idx}
+                    className="w-20 h-20 rounded-lg overflow-hidden border border-slate-200 shadow-sm bg-slate-100 cursor-pointer hover:shadow-md hover:scale-105 transition-all"
+                    onClick={() => setModalLightboxIdx(idx)}
+                  >
+                    <img src={url} alt={`รูป ${idx + 1}`} className="w-full h-full object-cover" />
+                  </div>
+                ))}
               </div>
             ) : (
-              <div className="h-32 bg-slate-50 rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400">
-                <Camera size={32} className="mb-2 opacity-50" />
-                <span className="text-sm">ไม่มีรูปภาพแนบ</span>
+              <div className="h-24 bg-slate-50 rounded-xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400">
+                <Camera size={24} className="mb-1 opacity-40" />
+                <span className="text-xs">ไม่มีรูปภาพแนบ</span>
               </div>
             )}
           </div>
@@ -371,6 +381,48 @@ const ReportDetailModal = ({ report, onClose, vehicleName, projectName }: { repo
           </button>
         </div>
       </Card>
+
+      {/* Lightbox inside modal */}
+      {modalLightboxIdx !== null && (
+        <div
+          className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center"
+          onClick={() => setModalLightboxIdx(null)}
+        >
+          <button
+            onClick={() => setModalLightboxIdx(null)}
+            className="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold"
+          >×</button>
+          {allPhotos.length > 1 && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); prevModalPhoto(); }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold"
+              >‹</button>
+              <button
+                onClick={(e) => { e.stopPropagation(); nextModalPhoto(); }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold"
+              >›</button>
+            </>
+          )}
+          <img
+            src={allPhotos[modalLightboxIdx]}
+            alt="ดูรูปใหญ่"
+            className="max-w-[90vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {allPhotos.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+              {allPhotos.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={(e) => { e.stopPropagation(); setModalLightboxIdx(i); }}
+                  className={`w-2 h-2 rounded-full transition-all ${i === modalLightboxIdx ? "bg-white scale-125" : "bg-white/40"}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -399,6 +451,7 @@ interface DailyReport {
   fuelLiters: number;
   problem: string;
   photo?: string;
+  photos?: string[];
   driverId: string;
   workHours: number;
   totalHours?: number;
@@ -481,7 +534,7 @@ function DailyReportViewInner({
     endTime: "",
     workDetails: "",
     problem: "",
-    photo: "",
+    photos: [] as string[],
     fuelLiters: 0,
     mileageOrHours: "",
   });
@@ -494,6 +547,15 @@ function DailyReportViewInner({
     reportFormRef.current = next;
     if (isModalOpen) setReportForm(next);
   };
+
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const [uploadPhotoProgress, setUploadPhotoProgress] = useState(0);
+  const [isUploadingBreakdownPhoto, setIsUploadingBreakdownPhoto] = useState(false);
+  const [uploadBreakdownProgress, setUploadBreakdownProgress] = useState(0);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxList, setLightboxList] = useState<string[]>([]);
 
   const [reportToDelete, setReportToDelete] = useState<DailyReport | null>(null);
   const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
@@ -520,7 +582,9 @@ function DailyReportViewInner({
         endTime: report.endTime || "",
         workDetails: report.workDetails || "",
         problem: report.problem || "",
-        photo: report.photo || "",
+        photos: report.photos && report.photos.length > 0
+          ? report.photos
+          : report.photo ? [report.photo] : [],
         fuelLiters: report.fuelLiters || 0,
         mileageOrHours: (report as any).mileageOrHours || "",
       };
@@ -537,17 +601,21 @@ function DailyReportViewInner({
         endTime: "",
         workDetails: "",
         problem: "",
-        photo: "",
+        photos: [] as string[],
         fuelLiters: 0,
         mileageOrHours: "",
       };
       reportFormRef.current = initial;
       setReportForm(initial);
     }
+    setIsUploadingPhoto(false);
+    setUploadPhotoProgress(0);
     setIsModalOpen(true);
   };
 
   const openBreakdownModal = () => {
+    setIsUploadingBreakdownPhoto(false);
+    setUploadBreakdownProgress(0);
     setBreakdownForm({
       projectId: "",
       vehicleId: "",
@@ -664,26 +732,148 @@ function DailyReportViewInner({
     alert("แจ้งรถเสียไปยังแอดมินแล้ว จะทำการติดต่อกลับโดยเร็ว");
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setReportFormField({ photo: "https://placehold.co/600x400/png?text=Mock+Image" });
-      alert("อัพโหลดรูปภาพจำลองสำเร็จ (Mock Upload)");
+  const uploadImageToStorage = (
+    file: File,
+    folder: string,
+    onProgress: (p: number) => void
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const ext = file.name.split(".").pop() || "jpg";
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const path = `${appId}/${folder}/${fileName}`;
+      const fileRef = storageRef(storage, path);
+      const uploadTask = uploadBytesResumable(fileRef, file);
+
+      const timeoutId = setTimeout(() => {
+        uploadTask.cancel();
+        reject(new Error("หมดเวลา — กรุณาตรวจสอบ Firebase Storage Rules: ต้องอนุญาต allow read, write: if request.auth != null;"));
+      }, 30000);
+
+      uploadTask.on(
+        "state_changed",
+        (snap) => {
+          const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+          onProgress(pct);
+        },
+        (err) => {
+          clearTimeout(timeoutId);
+          if ((err as any).code === "storage/unauthorized") {
+            reject(new Error("ไม่มีสิทธิ์อัพโหลด — กรุณาแก้ไข Firebase Storage Rules ให้เป็น: allow read, write: if request.auth != null;"));
+          } else if ((err as any).code === "storage/canceled") {
+            reject(new Error("ยกเลิกการอัพโหลด"));
+          } else {
+            reject(err);
+          }
+        },
+        async () => {
+          clearTimeout(timeoutId);
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(url);
+        }
+      );
+    });
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const oversized = files.filter((f) => f.size > 10 * 1024 * 1024);
+    if (oversized.length > 0) return alert(`ไฟล์ ${oversized.map(f => f.name).join(", ")} ใหญ่เกิน 10MB`);
+    setIsUploadingPhoto(true);
+    setUploadingCount(files.length);
+    setUploadPhotoProgress(0);
+    e.target.value = "";
+    try {
+      const urls = await Promise.all(
+        files.map((f) => uploadImageToStorage(f, "reports", setUploadPhotoProgress))
+      );
+      const current = reportFormRef.current.photos || [];
+      setReportFormField({ photos: [...current, ...urls] });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      alert("อัพโหลดรูปภาพไม่สำเร็จ: " + (err?.message || "กรุณาตรวจสอบ Firebase Storage rules"));
+    } finally {
+      setIsUploadingPhoto(false);
+      setUploadingCount(0);
     }
   };
 
-  const handleBreakdownPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBreakdownPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setBreakdownForm({
-        ...breakdownForm,
-        photo: "https://placehold.co/600x400/png?text=Breakdown+Image",
-      });
-      alert("อัพโหลดรูปภาพสำเร็จ (Mock)");
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) return alert("ไฟล์ใหญ่เกิน 10MB กรุณาเลือกรูปขนาดเล็กกว่านี้");
+    setIsUploadingBreakdownPhoto(true);
+    setUploadBreakdownProgress(0);
+    try {
+      const url = await uploadImageToStorage(file, "breakdowns", setUploadBreakdownProgress);
+      setBreakdownForm((prev) => ({ ...prev, photo: url }));
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      alert("อัพโหลดรูปภาพไม่สำเร็จ: " + (err?.message || "กรุณาตรวจสอบ Firebase Storage rules"));
+    } finally {
+      setIsUploadingBreakdownPhoto(false);
     }
+  };
+
+  const openLightbox = (urls: string[], idx: number) => {
+    setLightboxList(urls);
+    setLightboxIndex(idx);
+    setLightboxUrl(urls[idx]);
+  };
+  const closeLightbox = () => setLightboxUrl(null);
+  const prevPhoto = () => {
+    const i = (lightboxIndex - 1 + lightboxList.length) % lightboxList.length;
+    setLightboxIndex(i); setLightboxUrl(lightboxList[i]);
+  };
+  const nextPhoto = () => {
+    const i = (lightboxIndex + 1) % lightboxList.length;
+    setLightboxIndex(i); setLightboxUrl(lightboxList[i]);
   };
 
   return (
+    <>
+    {/* Lightbox */}
+    {lightboxUrl && (
+      <div
+        className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center"
+        onClick={closeLightbox}
+      >
+        <button
+          onClick={closeLightbox}
+          className="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10"
+        >×</button>
+        {lightboxList.length > 1 && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); prevPhoto(); }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10"
+            >‹</button>
+            <button
+              onClick={(e) => { e.stopPropagation(); nextPhoto(); }}
+              className="absolute right-14 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10"
+            >›</button>
+          </>
+        )}
+        <img
+          src={lightboxUrl}
+          alt="ดูรูปใหญ่"
+          className="max-w-[90vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        />
+        {lightboxList.length > 1 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+            {lightboxList.map((_, i) => (
+              <button
+                key={i}
+                onClick={(e) => { e.stopPropagation(); setLightboxIndex(i); setLightboxUrl(lightboxList[i]); }}
+                className={`w-2 h-2 rounded-full transition-all ${i === lightboxIndex ? "bg-white scale-125" : "bg-white/40"}`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+
     <div className="space-y-8 p-2">
       <div className="flex flex-wrap justify-between items-center gap-4">
         <h2 className="text-3xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
@@ -966,26 +1156,60 @@ function DailyReportViewInner({
                 />
               </div>
               <div>
-                <label className="label">10. รูปภาพ</label>
-                <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center cursor-pointer hover:bg-slate-50 relative">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    onChange={handlePhotoUpload}
-                  />
-                  <div className="flex flex-col items-center gap-2 text-slate-500">
-                    <Camera size={32} className="text-blue-400" />
-                    <span>
-                      {getReportForm().photo ? "เปลี่ยนรูปภาพ" : "อัพโหลดรูปภาพ"}
-                    </span>
-                    {getReportForm().photo && (
-                      <span className="text-green-600 text-sm font-medium">
-                        ✅ มีรูปภาพแล้ว
-                      </span>
+                <label className="label">10. รูปภาพหน้างาน</label>
+                <div className="flex flex-wrap gap-2">
+                  {(getReportForm().photos || []).map((url, idx) => (
+                    <div key={idx} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-slate-200 shadow-sm bg-slate-100 shrink-0">
+                      <img
+                        src={url}
+                        alt={`รูป ${idx + 1}`}
+                        className="w-full h-full object-cover cursor-pointer"
+                        onClick={() => {
+                          setLightboxList(getReportForm().photos || []);
+                          setLightboxIndex(idx);
+                          setLightboxUrl(url);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = (getReportForm().photos || []).filter((_, i) => i !== idx);
+                          setReportFormField({ photos: next });
+                        }}
+                        className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Upload button tile */}
+                  <label className={`w-20 h-20 rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer shrink-0 transition-colors ${isUploadingPhoto ? "border-blue-300 bg-blue-50" : "border-slate-300 hover:border-blue-400 hover:bg-blue-50"}`}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={handlePhotoUpload}
+                      disabled={isUploadingPhoto}
+                    />
+                    {isUploadingPhoto ? (
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-blue-500 text-xs font-medium">{uploadPhotoProgress}%</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 text-slate-400">
+                        <Camera size={22} className="text-blue-400" />
+                        <span className="text-xs font-medium text-blue-500">เพิ่มรูป</span>
+                      </div>
                     )}
-                  </div>
+                  </label>
                 </div>
+                {isUploadingPhoto && uploadingCount > 1 && (
+                  <p className="text-xs text-blue-500 mt-1">กำลังอัพโหลด {uploadingCount} ไฟล์...</p>
+                )}
+                <p className="text-xs text-slate-400 mt-1">กดรูปเพื่อดูขนาดใหญ่ · กด × เพื่อลบ · เลือกได้หลายรูปพร้อมกัน</p>
               </div>
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-end gap-4 rounded-b-2xl">
@@ -997,9 +1221,10 @@ function DailyReportViewInner({
               </button>
               <button
                 onClick={handleReportSubmit}
-                className="btn-primary shadow-lg shadow-blue-600/20"
+                disabled={isUploadingPhoto}
+                className="btn-primary shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                บันทึก
+                {isUploadingPhoto ? "กำลังอัพโหลดรูป..." : "บันทึก"}
               </button>
             </div>
           </Card>
@@ -1204,27 +1429,36 @@ function DailyReportViewInner({
               </div>
               <div>
                 <label className="label">8. รูปถ่าย (1 ภาพ)</label>
-                <div className="border-2 border-dashed border-red-200 rounded-xl p-6 text-center cursor-pointer hover:bg-red-50 relative">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    onChange={handleBreakdownPhotoUpload}
-                  />
-                  <div className="flex flex-col items-center gap-2 text-slate-500">
-                    <Camera size={32} className="text-red-400" />
-                    <span>
-                      {breakdownForm.photo
-                        ? "เปลี่ยนรูปภาพ"
-                        : "อัพโหลดรูปภาพ"}
-                    </span>
-                    {breakdownForm.photo && (
-                      <span className="text-green-600 text-sm font-medium">
-                        ✅ มีรูปภาพแล้ว
+                {breakdownForm.photo ? (
+                  <div className="rounded-xl overflow-hidden border border-red-200 shadow-sm relative group">
+                    <img src={breakdownForm.photo} alt="รูปรถเสีย" className="w-full max-h-56 object-cover" />
+                    <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={handleBreakdownPhotoUpload} disabled={isUploadingBreakdownPhoto} />
+                      <span className="text-white font-semibold text-sm bg-black/50 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                        <Camera size={16} /> เปลี่ยนรูปภาพ
                       </span>
-                    )}
+                    </label>
                   </div>
-                </div>
+                ) : (
+                  <label className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2 text-slate-500 cursor-pointer transition-colors ${isUploadingBreakdownPhoto ? "border-red-300 bg-red-50" : "border-red-200 hover:bg-red-50"}`}>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleBreakdownPhotoUpload} disabled={isUploadingBreakdownPhoto} />
+                    {isUploadingBreakdownPhoto ? (
+                      <>
+                        <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-red-600 font-medium text-sm">กำลังอัพโหลด {uploadBreakdownProgress}%</span>
+                        <div className="w-full bg-slate-200 rounded-full h-1.5">
+                          <div className="bg-red-500 h-1.5 rounded-full transition-all" style={{ width: `${uploadBreakdownProgress}%` }} />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={32} className="text-red-400" />
+                        <span className="font-medium">คลิกเพื่ออัพโหลดรูปภาพ</span>
+                        <span className="text-xs text-slate-400">รองรับ JPG, PNG, HEIC (สูงสุด 10MB)</span>
+                      </>
+                    )}
+                  </label>
+                )}
               </div>
             </div>
             <div className="p-6 border-t bg-slate-50 flex justify-end gap-4 rounded-b-2xl">
@@ -1236,15 +1470,17 @@ function DailyReportViewInner({
               </button>
               <button
                 onClick={handleBreakdownSubmit}
-                className="btn-primary bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20"
+                disabled={isUploadingBreakdownPhoto}
+                className="btn-primary bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                แจ้งรถเสีย
+                {isUploadingBreakdownPhoto ? "กำลังอัพโหลดรูป..." : "แจ้งรถเสีย"}
               </button>
             </div>
           </Card>
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -1360,14 +1596,322 @@ function ReportHistoryViewInner({ dailyReports, user, getVehicleName, getProject
   );
 }
 
+// --- STYLES (module-level so LoginView can access) ---
+const styleTags = `
+  .input-field { width: 100%; padding: 0.75rem 1rem; font-size: 0.95rem; border: 1px solid #cbd5e1; background-color: #ffffff; border-radius: 0.5rem; outline: none; transition: all 0.2s; }
+  .input-field:focus { border-color: #2563eb; ring: 2px; ring-color: #bfdbfe; }
+  .input-field-icon { width: 100%; padding: 0.75rem 1rem 0.75rem 3rem; font-size: 0.95rem; border: 1px solid #cbd5e1; background-color: #ffffff; border-radius: 0.5rem; outline: none; transition: all 0.2s; }
+  .input-field-icon:focus { border-color: #2563eb; ring: 2px; ring-color: #bfdbfe; }
+  .label { display: block; font-size: 0.9rem; font-weight: 600; color: #334155; margin-bottom: 0.4rem; }
+  .btn-primary { background-color: #2563eb; color: white; padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; }
+  .btn-primary:hover { background-color: #1d4ed8; transform: translateY(-1px); }
+  .btn-secondary { background-color: white; color: #475569; border: 1px solid #cbd5e1; padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; }
+  .btn-secondary:hover { background-color: #f1f5f9; }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  @keyframes strobe {
+    0% { background-color: #ef4444; color: white; transform: scale(1); }
+    50% { background-color: white; color: #ef4444; border-color: #ef4444; transform: scale(1.1); }
+    100% { background-color: #ef4444; color: white; transform: scale(1); }
+  }
+  .strobe-anim { animation: strobe 1s infinite; }
+`;
+
+// --- LOGIN VIEW (module-level: stable reference, no remount on App re-render) ---
+interface LoginViewProps {
+  usersList: User[];
+  addData: (collectionName: string, data: any) => Promise<void>;
+  setUser: React.Dispatch<React.SetStateAction<User | null>>;
+  logActivity: (action: string, details?: string) => Promise<void>;
+  setActiveTab: React.Dispatch<React.SetStateAction<string>>;
+}
+
+function LoginViewInner({ usersList, addData, setUser, logActivity, setActiveTab }: LoginViewProps) {
+  const [mode, setMode] = useState("login");
+  const [formData, setFormData] = useState({ empId: "", name: "", email: "" });
+  const [loginId, setLoginId] = useState("");
+  const [error, setError] = useState("");
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.empId || !formData.name)
+      return setError("กรุณากรอกรหัสพนักงานและชื่อ");
+    const existing = usersList.find((u) => u.empId === formData.empId);
+    if (existing) return setError("รหัสพนักงานนี้ถูกลงทะเบียนแล้ว");
+    const isFirstUser = usersList.length === 0;
+    const newUser = {
+      empId: formData.empId,
+      name: formData.name,
+      email: formData.email,
+      role: isFirstUser ? "Admin" : "User",
+      status: isFirstUser ? "Approved" : "Pending",
+    };
+    await addData("users", newUser);
+    alert(
+      isFirstUser
+        ? "ลงทะเบียนสำเร็จในฐานะ Admin!"
+        : "ลงทะเบียนสำเร็จ! กรุณารอการอนุมัติจาก Admin"
+    );
+    setMode("login");
+    setFormData({ empId: "", name: "", email: "" });
+    setError("");
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetUser = usersList.find(
+      (u) => u.empId === loginId || u.email === loginId
+    );
+    if (!targetUser) {
+      if (loginId === "admin") {
+        const adminData = {
+          empId: "admin",
+          name: "System Admin",
+          role: "Admin",
+          status: "Approved",
+          email: "admin@cmg.com",
+        };
+        await addData("users", adminData);
+        const tempUser = { ...adminData, id: "temp_admin" };
+        saveSession(tempUser);
+        setUser(tempUser);
+        logActivity("Login", "เข้าสู่ระบบสำเร็จ");
+        setActiveTab("dashboard");
+        return;
+      }
+      return setError("ไม่พบข้อมูลผู้ใช้งานนี้");
+    }
+    if (targetUser.status !== "Approved") {
+      return setError("บัญชีของท่านยังไม่ได้รับการอนุมัติ กรุณาติดต่อ Admin");
+    }
+    saveSession(targetUser);
+    setUser(targetUser);
+    logActivity("Login", "เข้าสู่ระบบสำเร็จ");
+    setActiveTab(targetUser.role === "Admin" ? "dashboard" : "daily");
+  };
+
+  return (
+    <div className="min-h-screen flex">
+      <style>{styleTags}</style>
+
+      {/* ===== LEFT PANEL ===== */}
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12"
+        style={{ background: "linear-gradient(145deg, #0f172a 0%, #1e3a5f 60%, #1e40af 100%)" }}>
+        {/* Logo */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center shadow-lg">
+            <Truck size={22} className="text-white" />
+          </div>
+          <div>
+            <div className="text-white font-bold text-lg leading-tight">CMG</div>
+            <div className="text-blue-300 text-xs">Equipment Management</div>
+          </div>
+        </div>
+
+        {/* Headline */}
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-4xl font-extrabold text-white leading-tight mb-2">
+              ระบบจัดการ<br />
+              <span className="text-blue-400">เครื่องจักร & รถ</span>
+            </h1>
+            <p className="text-blue-200 text-sm leading-relaxed">
+              Construction Management Group<br />
+              บริหารจัดการยานพาหนะและเครื่องจักรสำหรับโครงการก่อสร้าง<br />
+              อย่างมีประสิทธิภาพ โปร่งใส และตรวจสอบได้
+            </p>
+          </div>
+
+          {/* Feature list */}
+          <div className="space-y-3">
+            {[
+              { icon: "🚛", text: "ติดตามสถานะรถและเครื่องจักรแบบ Real-time" },
+              { icon: "📋", text: "รายงานประจำวัน — บันทึกง่าย ตรวจสอบได้" },
+              { icon: "🔧", text: "แจ้งซ่อมและติดตามสถานะการบำรุงรักษา" },
+              { icon: "👥", text: "ระบบสิทธิ์หลายระดับ Admin / Driver / User" },
+            ].map((f, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center text-base shrink-0">
+                  {f.icon}
+                </div>
+                <span className="text-blue-100 text-sm">{f.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <p className="text-blue-400/60 text-xs">© 2026 CMG · All rights reserved</p>
+      </div>
+
+      {/* ===== RIGHT PANEL ===== */}
+      <div className="flex-1 flex items-center justify-center bg-white p-8">
+        <div className="w-full max-w-sm">
+
+          {/* Mobile logo */}
+          <div className="flex items-center gap-3 mb-8 lg:hidden">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+              <Truck size={22} className="text-white" />
+            </div>
+            <div>
+              <div className="font-bold text-slate-800">CMG EQM</div>
+              <div className="text-slate-400 text-xs">Equipment Management</div>
+            </div>
+          </div>
+
+          {mode === "login" ? (
+            <>
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-slate-800 mb-1">
+                  ยินดีต้อนรับ 👋
+                </h2>
+                <p className="text-slate-500 text-sm">กรุณาเข้าสู่ระบบเพื่อดำเนินการต่อ</p>
+              </div>
+
+              {error && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-center gap-2 mb-5 border border-red-100">
+                  <AlertCircle size={16} className="shrink-0" /> {error}
+                </div>
+              )}
+
+              <form onSubmit={handleLoginSubmit} className="space-y-4">
+                <div>
+                  <label className="label">รหัสพนักงาน</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-3.5 text-slate-400 pointer-events-none" size={18} />
+                    <input
+                      type="text"
+                      className="input-field pl-10"
+                      style={{ paddingLeft: "2.5rem" }}
+                      placeholder="รหัสพนักงาน"
+                      value={loginId}
+                      onChange={(e) => setLoginId(e.target.value)}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold text-base transition-all shadow-lg shadow-blue-600/25 mt-2"
+                >
+                  เข้าสู่ระบบ
+                </button>
+              </form>
+
+              <p className="text-center text-sm text-slate-500 mt-6">
+                ยังไม่มีบัญชี?{" "}
+                <button
+                  type="button"
+                  onClick={() => { setMode("register"); setError(""); }}
+                  className="text-blue-600 font-semibold hover:underline"
+                >
+                  สมัครใช้งาน
+                </button>
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-slate-800 mb-1">สมัครใช้งาน</h2>
+                <p className="text-slate-500 text-sm">กรอกข้อมูลเพื่อสร้างบัญชีใหม่</p>
+              </div>
+
+              {error && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm flex items-center gap-2 mb-5 border border-red-100">
+                  <AlertCircle size={16} className="shrink-0" /> {error}
+                </div>
+              )}
+
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="label">รหัสพนักงาน <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="เช่น EMP001"
+                    value={formData.empId}
+                    onChange={(e) => setFormData({ ...formData, empId: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">ชื่อ - นามสกุล <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="ชื่อจริง นามสกุล"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">อีเมล (ถ้ามี)</label>
+                  <input
+                    type="email"
+                    className="input-field"
+                    placeholder="email@example.com"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold text-base transition-all shadow-lg shadow-blue-600/25 mt-1"
+                >
+                  ยืนยันการสมัคร
+                </button>
+              </form>
+
+              <p className="text-center text-sm text-slate-500 mt-6">
+                มีบัญชีแล้ว?{" "}
+                <button
+                  type="button"
+                  onClick={() => { setMode("login"); setError(""); }}
+                  className="text-blue-600 font-semibold hover:underline"
+                >
+                  เข้าสู่ระบบ
+                </button>
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- SESSION PERSISTENCE ---
+const SESSION_KEY = "cmg_eqm_session";
+
+const saveSession = (u: User) => {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(u)); } catch {}
+};
+const clearSession = () => {
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+};
+const loadSession = (): User | null => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch { return null; }
+};
+
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
   // --- STATE MANAGEMENT ---
-  const [user, setUser] = useState<User | null>(null); // Local UI User State
+  const [user, setUser] = useState<User | null>(() => loadSession()); // restore from localStorage
   const [firebaseUser, setFirebaseUser] = useState<any>(null); // Firebase Auth User
   const [authError, setAuthError] = useState<string | null>(null); // Track Auth Errors
-  const [activeTab, setActiveTab] = useState<string>("daily"); // Default to daily for user
+  const [authChecked, setAuthChecked] = useState<boolean>(false); // Firebase auth state resolved
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const saved = loadSession();
+    return saved ? (saved.role === "Admin" ? "dashboard" : "daily") : "daily";
+  });
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Data State (Synced with Firestore)
@@ -1400,6 +1944,7 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
+      setAuthChecked(true);
     });
     return () => unsubscribe();
   }, []);
@@ -1507,6 +2052,22 @@ export default function App() {
     seedAdmin();
   }, [firebaseUser, usersList]);
 
+  // --- SESSION VALIDATION: re-check saved user against live Firestore data ---
+  useEffect(() => {
+    if (usersList.length === 0 || !user) return;
+    const live = usersList.find((u) => u.empId === user.empId || u.id === user.id);
+    if (!live || live.status !== "Approved") {
+      // Account revoked or not found → force logout
+      clearSession();
+      setUser(null);
+      return;
+    }
+    // Update local state & storage with latest data from Firestore (name/role may change)
+    const updated: User = { ...live };
+    setUser(updated);
+    saveSession(updated);
+  }, [usersList]); // eslint-disable-line
+
   // --- HELPER: SYSTEM LOGGING ---
   const logActivity = async (action: string, details: string = "") => {
     if (!user) return;
@@ -1589,215 +2150,6 @@ export default function App() {
   };
 
   // --- VIEWS ---
-  // ... LoginView, AdminUserView ... (Same as before)
-  const LoginView = () => {
-    const [mode, setMode] = useState("login");
-    const [formData, setFormData] = useState({
-      empId: "",
-      name: "",
-      email: "",
-    });
-    const [loginId, setLoginId] = useState("");
-    const [error, setError] = useState("");
-
-    const handleRegister = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!formData.empId || !formData.name)
-        return setError("กรุณากรอกรหัสพนักงานและชื่อ");
-
-      const existing = usersList.find((u) => u.empId === formData.empId);
-      if (existing) return setError("รหัสพนักงานนี้ถูกลงทะเบียนแล้ว");
-
-      const isFirstUser = usersList.length === 0;
-      const newUser = {
-        empId: formData.empId,
-        name: formData.name,
-        email: formData.email,
-        role: isFirstUser ? "Admin" : "User",
-        status: isFirstUser ? "Approved" : "Pending",
-      };
-
-      await addData("users", newUser);
-      alert(
-        isFirstUser
-          ? "ลงทะเบียนสำเร็จในฐานะ Admin!"
-          : "ลงทะเบียนสำเร็จ! กรุณารอการอนุมัติจาก Admin"
-      );
-      setMode("login");
-      setFormData({ empId: "", name: "", email: "" });
-      setError("");
-    };
-
-    const handleLoginSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      const targetUser = usersList.find(
-        (u) => u.empId === loginId || u.email === loginId
-      );
-
-      if (!targetUser) {
-        if (loginId === "admin") {
-          const adminData = {
-            empId: "admin",
-            name: "System Admin",
-            role: "Admin",
-            status: "Approved",
-            email: "admin@cmg.com",
-          };
-          await addData("users", adminData);
-          const tempUser = { ...adminData, id: "temp_admin" };
-          setUser(tempUser);
-          return;
-        }
-        return setError("ไม่พบข้อมูลผู้ใช้งานนี้");
-      }
-
-      if (targetUser.status !== "Approved") {
-        return setError("บัญชีของท่านยังไม่ได้รับการอนุมัติ กรุณาติดต่อ Admin");
-      }
-
-      setUser(targetUser);
-      logActivity("Login", "เข้าสู่ระบบสำเร็จ");
-
-      setActiveTab(targetUser.role === "Admin" ? "dashboard" : "daily");
-    };
-
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <style>{styleTags}</style>
-        <Card className="w-full max-w-md p-8 shadow-2xl border-0 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
-
-          <div className="text-center mb-8">
-            <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4 text-blue-600 shadow-inner">
-              <Truck size={40} />
-            </div>
-            <h1 className="text-3xl font-extrabold text-slate-800 mb-1">
-              CMG EQM
-            </h1>
-            <p className="text-slate-500 text-sm">
-              Construction Machinery & Fleet Management
-            </p>
-          </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 mb-6 border border-red-100 animate-fade-in">
-              <AlertCircle size={16} /> {error}
-            </div>
-          )}
-
-          {mode === "login" ? (
-            <form
-              onSubmit={handleLoginSubmit}
-              className="space-y-5 animate-fade-in"
-            >
-              <div>
-                <label className="label">รหัสพนักงาน หรือ อีเมล</label>
-                <div className="relative">
-                  <User
-                    className="absolute left-3 top-3 text-slate-400 z-10"
-                    size={20}
-                  />
-                  <input
-                    type="text"
-                    className="input-field-icon pl-12"
-                    placeholder="เช่น admin หรือ รหัสพนักงาน"
-                    value={loginId}
-                    onChange={(e) => setLoginId(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                className="w-full btn-primary py-3 text-lg shadow-lg shadow-blue-600/30"
-              >
-                เข้าสู่ระบบ
-              </button>
-              <div className="text-center pt-4">
-                <span className="text-slate-500 text-sm">ยังไม่มีบัญชี? </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("register");
-                    setError("");
-                  }}
-                  className="text-blue-600 font-semibold hover:underline text-sm"
-                >
-                  ลงทะเบียน
-                </button>
-              </div>
-            </form>
-          ) : (
-            <form
-              onSubmit={handleRegister}
-              className="space-y-5 animate-fade-in"
-            >
-              <div>
-                <label className="label">
-                  รหัสพนักงาน <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="เช่น EMP001"
-                  value={formData.empId}
-                  onChange={(e) =>
-                    setFormData({ ...formData, empId: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className="label">
-                  ชื่อ - นามสกุล <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="ชื่อจริง นามสกุล"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div>
-                <label className="label">อีเมล (ถ้ามี)</label>
-                <input
-                  type="email"
-                  className="input-field"
-                  placeholder="email@example.com"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-medium shadow-lg shadow-green-600/30 transition-all"
-              >
-                ยืนยันการลงทะเบียน
-              </button>
-              <div className="text-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("login");
-                    setError("");
-                  }}
-                  className="text-slate-500 hover:text-slate-700 text-sm"
-                >
-                  ยกเลิก / กลับไปหน้าเข้าสู่ระบบ
-                </button>
-              </div>
-            </form>
-          )}
-        </Card>
-      </div>
-    );
-  };
 
   const AdminUserView = () => {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -3860,33 +4212,30 @@ export default function App() {
   };
 
   // --- STYLES ---
-  const styleTags = `
-    .input-field { width: 100%; padding: 0.75rem 1rem; font-size: 0.95rem; border: 1px solid #cbd5e1; background-color: #ffffff; border-radius: 0.5rem; outline: none; transition: all 0.2s; }
-    .input-field:focus { border-color: #2563eb; ring: 2px; ring-color: #bfdbfe; }
-    .input-field-icon { width: 100%; padding: 0.75rem 1rem 0.75rem 3rem; font-size: 0.95rem; border: 1px solid #cbd5e1; background-color: #ffffff; border-radius: 0.5rem; outline: none; transition: all 0.2s; } 
-    .input-field-icon:focus { border-color: #2563eb; ring: 2px; ring-color: #bfdbfe; }
-    .label { display: block; font-size: 0.9rem; font-weight: 600; color: #334155; margin-bottom: 0.4rem; }
-    .btn-primary { background-color: #2563eb; color: white; padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; }
-    .btn-primary:hover { background-color: #1d4ed8; transform: translateY(-1px); }
-    .btn-secondary { background-color: white; color: #475569; border: 1px solid #cbd5e1; padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; }
-    .btn-secondary:hover { background-color: #f1f5f9; }
-    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-    .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
-    .scrollbar-hide::-webkit-scrollbar { display: none; }
-    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-
-    @keyframes strobe {
-        0% { background-color: #ef4444; color: white; transform: scale(1); }
-        50% { background-color: white; color: #ef4444; border-color: #ef4444; transform: scale(1.1); }
-        100% { background-color: #ef4444; color: white; transform: scale(1); }
-    }
-    .strobe-anim {
-        animation: strobe 1s infinite;
-    }
-  `;
-
   // --- RENDER ---
-  if (!user) return <LoginView />;
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <style>{styleTags}</style>
+        <div className="flex flex-col items-center gap-4 text-slate-400">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500 shadow-inner">
+            <Truck size={32} />
+          </div>
+          <p className="text-sm font-medium animate-fade-in">กำลังโหลด...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return (
+    <LoginViewInner
+      usersList={usersList}
+      addData={addData}
+      setUser={setUser}
+      logActivity={logActivity}
+      setActiveTab={setActiveTab}
+    />
+  );
   const newBreakdownCount = breakdownReports.filter(
     (b: any) => b.status === "New"
   ).length;
@@ -3943,7 +4292,7 @@ export default function App() {
               </div>
             </div>
             <button
-              onClick={() => setUser(null)}
+              onClick={() => { clearSession(); setUser(null); }}
               className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
             >
               <LogOut size={20} />
