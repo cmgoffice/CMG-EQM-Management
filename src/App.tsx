@@ -67,13 +67,13 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDWmurzN4zlvKjuQPE2AVuC3foTFnitVgQ",
-  authDomain: "cmg-equipment-supervisor.firebaseapp.com",
-  projectId: "cmg-equipment-supervisor",
-  storageBucket: "cmg-equipment-supervisor.firebasestorage.app",
-  messagingSenderId: "332306227075",
-  appId: "1:332306227075:web:68425b0229b1e95b20a0b6",
-  measurementId: "G-XRS8ZCRX4P",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID,
 };
 
 // Initialize Firebase
@@ -94,6 +94,10 @@ const VEHICLE_TYPES = [
   "รถ Backhole (PC200)",
   "Crane 25 ton",
 ];
+
+// ประเภทที่ต้องมีช่อง ปจ.2
+const MACHINE_TYPES = ["รถเฮียบ", "รถ JCB", "รถ Backhole (PC30)", "รถ Backhole (PC200)", "Crane 25 ton"];
+const isMachineVehicle = (type: string) => MACHINE_TYPES.some((m) => type?.includes(m) || m?.includes(type));
 
 const MAINTENANCE_STATUS = [
   {
@@ -2840,12 +2844,14 @@ export default function App() {
                     <div className="overflow-x-auto">
                       <table className="w-full table-fixed text-xs text-left border-collapse">
                         <colgroup>
-                          <col className="w-[14%]" />
-                          <col className="w-[20%]" />
                           <col className="w-[12%]" />
-                          <col className="w-[14%]" />
-                          <col className="w-[22%]" />
-                          <col className="w-[18%]" />
+                          <col className="w-[16%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[16%]" />
+                          <col className="w-[13%]" />
+                          <col className="w-[13%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[10%]" />
                         </colgroup>
                         <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
                           <tr>
@@ -2853,12 +2859,23 @@ export default function App() {
                             <th className="px-3 py-1.5">ประเภท</th>
                             <th className="px-3 py-1.5">สถานะ</th>
                             <th className="px-3 py-1.5">คนขับ</th>
-                            <th className="px-3 py-1.5">ทะเบียน/ภาษีหมดอายุ</th>
+                            <th className="px-3 py-1.5">ต่อภาษี</th>
+                            <th className="px-3 py-1.5">ประกันภัย</th>
+                            <th className="px-3 py-1.5">ปจ.2</th>
                             <th className="px-3 py-1.5 text-right">จัดการ</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {projectVehicles.map((v) => (
+                          {projectVehicles.map((v) => {
+                            const today = new Date().toISOString().split("T")[0];
+                            const expiredCls = (d?: string) => d && d < today ? "text-red-600 font-semibold" : "text-slate-600";
+                            const driverNames = v.id
+                              ? usersList
+                                  .filter((u) => (Array.isArray(u.vehicleIds) && u.vehicleIds.includes(v.id!)) || u.vehicleId === v.id)
+                                  .map((u) => u.name)
+                                  .filter(Boolean)
+                              : [];
+                            return (
                             <tr
                               key={v.id}
                               onClick={() => openModal(v)}
@@ -2869,28 +2886,13 @@ export default function App() {
                               <td className="px-3 py-1.5">
                                 <Badge status={v.status} />
                               </td>
-                              <td className="px-3 py-1.5 text-slate-600 truncate">
-                                {(() => {
-                                  if (!v.id) return <span className="text-slate-400">-</span>;
-                                  const vehicleDrivers = usersList.filter((u) => {
-                                    const multiple = Array.isArray(u.vehicleIds) && u.vehicleIds.includes(v.id);
-                                    const single = u.vehicleId === v.id;
-                                    return multiple || single;
-                                  });
-                                  const names = vehicleDrivers.map((u) => u.name).filter(Boolean);
-                                  if (v.driver && !names.includes(v.driver)) {
-                                    names.push(v.driver);
-                                  }
-                                  if (names.length === 0) {
-                                    return <span className="text-slate-400">-</span>;
-                                  }
-                                  return <span title={names.join(", ")}>{names.join(", ")}</span>;
-                                })()}
+                              <td className="px-3 py-1.5 text-slate-600 truncate" title={driverNames.join(", ")}>
+                                {driverNames.length > 0 ? driverNames.join(", ") : <span className="text-slate-400">-</span>}
                               </td>
-                              <td className="px-3 py-1.5">
-                                <span className={v.regExp && v.regExp < "2024-01-01" ? "text-red-600 font-medium" : "text-slate-600"}>
-                                  {v.regExp || "-"}
-                                </span>
+                              <td className={`px-3 py-1.5 ${expiredCls(v.regExp)}`}>{v.regExp || "-"}</td>
+                              <td className={`px-3 py-1.5 ${expiredCls(v.insuranceExp)}`}>{v.insuranceExp || "-"}</td>
+                              <td className={`px-3 py-1.5 ${isMachineVehicle(v.type) ? expiredCls(v.pj2Exp) : "text-slate-300"}`}>
+                                {isMachineVehicle(v.type) ? (v.pj2Exp || "-") : "—"}
                               </td>
                               <td className="px-3 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                                 <div className="flex justify-end gap-1.5">
@@ -2909,7 +2911,8 @@ export default function App() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -3061,21 +3064,18 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-2 gap-6 mt-4">
                       <div>
-                        <label className="label">ประกันหมดอายุ</label>
+                        <label className="label">🛡️ ประกันภัยหมดอายุ</label>
                         <input
                           type="date"
                           className="input-field"
                           value={formData.insuranceExp || ""}
                           onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              insuranceExp: e.target.value,
-                            })
+                            setFormData({ ...formData, insuranceExp: e.target.value })
                           }
                         />
                       </div>
                       <div>
-                        <label className="label">ต่อภาษี</label>
+                        <label className="label">📋 ต่อภาษี (ทะเบียนหมดอายุ)</label>
                         <input
                           type="date"
                           className="input-field"
@@ -3086,6 +3086,19 @@ export default function App() {
                         />
                       </div>
                     </div>
+                    {isMachineVehicle(formData.type || "") && (
+                      <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                        <label className="label text-amber-800">🏗️ ปจ.2 หมดอายุ <span className="text-xs font-normal text-amber-600">(เฉพาะเครื่องจักร/เฮียบ/เครน)</span></label>
+                        <input
+                          type="date"
+                          className="input-field border-amber-300 focus:ring-amber-500"
+                          value={formData.pj2Exp || ""}
+                          onChange={(e) =>
+                            setFormData({ ...formData, pj2Exp: e.target.value })
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
