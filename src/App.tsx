@@ -92,6 +92,7 @@ const VEHICLE_TYPES = [
   "รถ JCB",
   "รถ Backhole (PC30)",
   "รถ Backhole (PC200)",
+  "Crane 25 ton",
 ];
 
 const MAINTENANCE_STATUS = [
@@ -2404,45 +2405,45 @@ export default function App() {
           </Card>
         </div>
 
-        {/* Vehicle Status Row - Pastel */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Card className="p-3 bg-sky-100/90 border border-sky-200">
+        {/* Vehicle Status Row - Compact */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <Card className="p-2 bg-sky-50 border border-sky-100 rounded-lg shadow-none">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sky-700 text-xs font-medium mb-0.5 flex items-center gap-1">
+                <p className="text-sky-700 text-[11px] font-medium mb-0.5 flex items-center gap-1">
                   <span>✅</span> รถที่ใช้งานอยู่ (Active)
                 </p>
-                <p className="text-2xl font-bold text-sky-800">
+                <p className="text-xl font-bold text-sky-800">
                   {stats.activeVehicles}{" "}
-                  <span className="text-sm font-normal text-sky-600">คัน</span>
+                  <span className="text-xs font-normal text-sky-600">คัน</span>
                 </p>
               </div>
-              <span className="text-2xl opacity-80">🚙</span>
+              <span className="text-xl opacity-80">🚙</span>
             </div>
           </Card>
-          <Card className="p-3 bg-rose-100/90 border border-rose-200">
+          <Card className="p-2 bg-rose-50 border border-rose-100 rounded-lg shadow-none">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-rose-700 text-xs font-medium mb-0.5 flex items-center gap-1">
+                <p className="text-rose-700 text-[11px] font-medium mb-0.5 flex items-center gap-1">
                   <span>🔧</span> รถซ่อม/รอซ่อม (Maintenance)
                 </p>
-                <p className="text-2xl font-bold text-rose-800">
+                <p className="text-xl font-bold text-rose-800">
                   {stats.maintenanceVehicles}{" "}
-                  <span className="text-sm font-normal text-rose-600">คัน</span>
+                  <span className="text-xs font-normal text-rose-600">คัน</span>
                 </p>
               </div>
-              <span className="text-2xl opacity-80">⚠️</span>
+              <span className="text-xl opacity-80">⚠️</span>
             </div>
           </Card>
-          <Card className="p-3 bg-slate-100/90 border border-slate-200">
+          <Card className="p-2 bg-slate-50 border border-slate-100 rounded-lg shadow-none">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-slate-600 text-xs font-medium mb-0.5 flex items-center gap-1">
+                <p className="text-slate-600 text-[11px] font-medium mb-0.5 flex items-center gap-1">
                   <span>🅿️</span> รถว่าง/ไม่มีคนขับ (Empty)
                 </p>
-                <p className="text-2xl font-bold text-slate-700">
+                <p className="text-xl font-bold text-slate-700">
                   {stats.emptyVehicles}{" "}
-                  <span className="text-sm font-normal text-slate-500">คัน</span>
+                  <span className="text-xs font-normal text-slate-500">คัน</span>
                 </p>
                 <p className="text-[10px] text-slate-400 mt-0.5">ข้อมูลจากทะเบียนรถและเครื่องจักร</p>
               </div>
@@ -2868,7 +2869,24 @@ export default function App() {
                               <td className="px-3 py-1.5">
                                 <Badge status={v.status} />
                               </td>
-                              <td className="px-3 py-1.5 text-slate-600 truncate" title={v.driver || ""}>{v.driver || "-"}</td>
+                              <td className="px-3 py-1.5 text-slate-600 truncate">
+                                {(() => {
+                                  if (!v.id) return <span className="text-slate-400">-</span>;
+                                  const vehicleDrivers = usersList.filter((u) => {
+                                    const multiple = Array.isArray(u.vehicleIds) && u.vehicleIds.includes(v.id);
+                                    const single = u.vehicleId === v.id;
+                                    return multiple || single;
+                                  });
+                                  const names = vehicleDrivers.map((u) => u.name).filter(Boolean);
+                                  if (v.driver && !names.includes(v.driver)) {
+                                    names.push(v.driver);
+                                  }
+                                  if (names.length === 0) {
+                                    return <span className="text-slate-400">-</span>;
+                                  }
+                                  return <span title={names.join(", ")}>{names.join(", ")}</span>;
+                                })()}
+                              </td>
                               <td className="px-3 py-1.5">
                                 <span className={v.regExp && v.regExp < "2024-01-01" ? "text-red-600 font-medium" : "text-slate-600"}>
                                   {v.regExp || "-"}
