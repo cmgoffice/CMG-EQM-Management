@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   LayoutDashboard,
   Truck,
@@ -3686,9 +3687,10 @@ export default function App() {
           </div>
         </Card>
 
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] animate-fade-in backdrop-blur-sm">
-            <Card className="w-full max-w-2xl max-h-[95vh] h-full overflow-y-auto shadow-2xl flex flex-col">
+        {isModalOpen &&
+          createPortal(
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] animate-fade-in backdrop-blur-sm overflow-y-auto">
+              <Card className="w-full max-w-2xl max-h-[90vh] my-auto shadow-2xl flex flex-col overflow-hidden">
               <div className="p-6 border-b flex justify-between items-center bg-slate-50 rounded-t-lg sticky top-0 z-10 shrink-0">
                 <h3 className="text-xl font-bold flex items-center gap-2">
                   {editingLog ? (
@@ -3852,9 +3854,10 @@ export default function App() {
                   บันทึกข้อมูล
                 </button>
               </div>
-            </Card>
-          </div>
-        )}
+              </Card>
+            </div>,
+            document.body
+          )}
       </div>
     );
   };
