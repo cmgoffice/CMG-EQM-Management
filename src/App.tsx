@@ -13,6 +13,8 @@ import {
   Calendar,
   User,
   ChevronRight,
+  ChevronDown,
+  Check,
   Save,
   Fuel,
   AlertTriangle,
@@ -47,6 +49,9 @@ import {
   BarChart3,
   Download,
   FileBarChart,
+  Sun,
+  Moon,
+  Sparkles,
 } from "lucide-react";
 
 // --- FIREBASE IMPORTS ---
@@ -69,13 +74,13 @@ import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } f
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID,
-  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID,
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyDWmurzN4zlvKjuQPE2AVuC3foTFnitVgQ",
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "cmg-equipment-supervisor.firebaseapp.com",
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "cmg-equipment-supervisor",
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "cmg-equipment-supervisor.firebasestorage.app",
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "332306227075",
+  appId: process.env.REACT_APP_FIREBASE_APP_ID || "1:332306227075:web:68425b0229b1e95b20a0b6",
+  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID || "G-XRS8ZCRX4P",
 };
 
 // Initialize Firebase
@@ -84,6 +89,48 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 const appId = "cmg-equipment-supervisor";
+
+const uploadImageToStorage = (
+  file: File,
+  folder: string,
+  onProgress: (p: number) => void
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const ext = file.name.split(".").pop() || "jpg";
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const path = `${appId}/${folder}/${fileName}`;
+    const fileRef = storageRef(storage, path);
+    const uploadTask = uploadBytesResumable(fileRef, file);
+
+    const timeoutId = setTimeout(() => {
+      uploadTask.cancel();
+      reject(new Error("หมดเวลา — กรุณาตรวจสอบ Firebase Storage Rules: ต้องอนุญาต allow read, write: if request.auth != null;"));
+    }, 30000);
+
+    uploadTask.on(
+      "state_changed",
+      (snap) => {
+        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+        onProgress(pct);
+      },
+      (err) => {
+        clearTimeout(timeoutId);
+        if ((err as any).code === "storage/unauthorized") {
+          reject(new Error("ไม่มีสิทธิ์อัพโหลด — กรุณาแก้ไข Firebase Storage Rules ให้เป็น: allow read, write: if request.auth != null;"));
+        } else if ((err as any).code === "storage/canceled") {
+          reject(new Error("ยกเลิกการอัพโหลด"));
+        } else {
+          reject(err);
+        }
+      },
+      async () => {
+        clearTimeout(timeoutId);
+        const url = await getDownloadURL(uploadTask.snapshot.ref);
+        resolve(url);
+      }
+    );
+  });
+};
 
 // --- CONSTANTS ---
 const VEHICLE_TYPES = [
@@ -104,11 +151,6 @@ const isMachineVehicle = (type: string) => MACHINE_TYPES.some((m) => type?.inclu
 
 const MAINTENANCE_STATUS = [
   {
-    value: "Pending",
-    label: "🟡 รอการซ่อม",
-    color: "bg-yellow-100 text-yellow-800",
-  },
-  {
     value: "InProgress",
     label: "🔵 กำลังซ่อม",
     color: "bg-blue-100 text-blue-800",
@@ -118,44 +160,71 @@ const MAINTENANCE_STATUS = [
     label: "🟢 ซ่อมเสร็จแล้ว",
     color: "bg-green-100 text-green-800",
   },
-  {
-    value: "Cancelled",
-    label: "⚪ ยกเลิก",
-    color: "bg-gray-100 text-gray-800",
-  },
 ];
 
 // --- COMPONENTS ---
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
   <div
-    className={`bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.06)] border border-slate-100 ${className}`}
+    className={`bg-white rounded-2xl shadow-[0_2px_12px_rgba(15,23,42,0.04)] border border-slate-200/90 text-slate-800 transition-all ${className}`}
   >
     {children}
   </div>
 );
 
+const MaintenanceStatusBadge = ({ status }: { status: string }) => {
+  switch (status) {
+    case "InProgress":
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200/80">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+          กำลังซ่อม
+        </span>
+      );
+    case "Completed":
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          ซ่อมเสร็จแล้ว
+        </span>
+      );
+    case "Pending":
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/80">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+          รอการซ่อม
+        </span>
+      );
+    case "Cancelled":
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+          ยกเลิก
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+          {status}
+        </span>
+      );
+  }
+};
+
 const Badge = ({ status, type = "vehicle" }: { status: string; type?: string }) => {
   if (type === "maintenance") {
-    const s =
-      MAINTENANCE_STATUS.find((x) => x.value === status) ||
-      MAINTENANCE_STATUS[0];
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${s.color}`}>
-        {s.label}
-      </span>
-    );
+    return <MaintenanceStatusBadge status={status} />;
   }
 
   const styles: Record<string, string> = {
-    Ready: "bg-green-100 text-green-800",
-    Maintenance: "bg-red-100 text-red-800",
-    Busy: "bg-blue-100 text-blue-800",
-    Other: "bg-gray-100 text-gray-800",
+    Ready: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
+    Maintenance: "bg-rose-50 text-rose-700 border-rose-200/80",
+    Busy: "bg-blue-50 text-blue-700 border-blue-200/80",
+    Other: "bg-slate-100 text-slate-700 border-slate-200",
   };
   return (
     <span
-      className={`px-2 py-1 rounded-full text-xs font-medium ${
+      className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
         styles[status] || styles.Other
       }`}
     >
@@ -195,11 +264,27 @@ const getVehicleProjectIds = (v: any): string[] => {
   return v?.currentProjectId ? [v.currentProjectId] : [];
 };
 
-const NavButton = ({ icon: Icon, label, active, onClick, className = "", activeBg = "bg-blue-600 text-white shadow-lg shadow-blue-600/20" }: { icon: any; label: string; active: boolean; onClick: () => void; className?: string; activeBg?: string }) => (
+const NavButton = ({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+  className = "",
+  activeBg = "bg-blue-600 text-white shadow-sm"
+}: {
+  icon: any;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  className?: string;
+  activeBg?: string;
+}) => (
   <button
     onClick={onClick}
-    className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all whitespace-nowrap ${
-      active ? `${activeBg} scale-105` : "text-slate-600 hover:bg-slate-100"
+    className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-xl transition-all whitespace-nowrap ${
+      active
+        ? `${activeBg} shadow-sm`
+        : "text-slate-600 hover:text-slate-900 hover:bg-white/80"
     } ${className}`}
   >
     <Icon size={18} /> {label}
@@ -731,48 +816,6 @@ function DailyReportViewInner({
     );
     setIsBreakdownModalOpen(false);
     alert("แจ้งรถเสียไปยังแอดมินแล้ว จะทำการติดต่อกลับโดยเร็ว");
-  };
-
-  const uploadImageToStorage = (
-    file: File,
-    folder: string,
-    onProgress: (p: number) => void
-  ): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const ext = file.name.split(".").pop() || "jpg";
-      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      const path = `${appId}/${folder}/${fileName}`;
-      const fileRef = storageRef(storage, path);
-      const uploadTask = uploadBytesResumable(fileRef, file);
-
-      const timeoutId = setTimeout(() => {
-        uploadTask.cancel();
-        reject(new Error("หมดเวลา — กรุณาตรวจสอบ Firebase Storage Rules: ต้องอนุญาต allow read, write: if request.auth != null;"));
-      }, 30000);
-
-      uploadTask.on(
-        "state_changed",
-        (snap) => {
-          const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-          onProgress(pct);
-        },
-        (err) => {
-          clearTimeout(timeoutId);
-          if ((err as any).code === "storage/unauthorized") {
-            reject(new Error("ไม่มีสิทธิ์อัพโหลด — กรุณาแก้ไข Firebase Storage Rules ให้เป็น: allow read, write: if request.auth != null;"));
-          } else if ((err as any).code === "storage/canceled") {
-            reject(new Error("ยกเลิกการอัพโหลด"));
-          } else {
-            reject(err);
-          }
-        },
-        async () => {
-          clearTimeout(timeoutId);
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(url);
-        }
-      );
-    });
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1612,6 +1655,14 @@ const styleTags = `
   .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .dark .input-field { width: 100%; padding: 0.75rem 1rem; font-size: 0.95rem; border: 1px solid #334155; background-color: #1e293b; color: #f8fafc; border-radius: 0.5rem; outline: none; transition: all 0.2s; }
+  .dark .input-field:focus { border-color: #3b82f6; ring: 2px; ring-color: rgba(59, 130, 246, 0.3); }
+  .dark .input-field option { background-color: #0f172a; color: #f8fafc; }
+  .dark .input-field-icon { width: 100%; padding: 0.75rem 1rem 0.75rem 3rem; font-size: 0.95rem; border: 1px solid #334155; background-color: #1e293b; color: #f8fafc; border-radius: 0.5rem; outline: none; transition: all 0.2s; }
+  .dark .input-field-icon:focus { border-color: #3b82f6; ring: 2px; ring-color: rgba(59, 130, 246, 0.3); }
+  .dark .label { display: block; font-size: 0.9rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.4rem; }
+  .dark .btn-secondary { background-color: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 0.6rem 1.2rem; border-radius: 0.5rem; font-weight: 600; transition: all 0.2s; }
+  .dark .btn-secondary:hover { background-color: #334155; }
   @keyframes strobe {
     0% { background-color: #ef4444; color: white; transform: scale(1); }
     50% { background-color: white; color: #ef4444; border-color: #ef4444; transform: scale(1.1); }
@@ -1909,6 +1960,15 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<any>(null); // Firebase Auth User
   const [authError, setAuthError] = useState<string | null>(null); // Track Auth Errors
   const [authChecked, setAuthChecked] = useState<boolean>(false); // Firebase auth state resolved
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    try {
+      localStorage.setItem("cmg_dark_mode", "false");
+    } catch {}
+  }, []);
+
   const [activeTab, setActiveTab] = useState<string>(() => {
     const saved = loadSession();
     return saved ? (saved.role === "Admin" ? "dashboard" : "daily") : "daily";
@@ -3468,7 +3528,7 @@ export default function App() {
                           <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
                             <tr>
                               <th className="p-3">วันที่</th>
-                              <th className="p-3">อาการ/สาเหตุ</th>
+                              <th className="p-3">อาการ / สถานที่ซ่อม</th>
                               <th className="p-3">การซ่อม</th>
                               <th className="p-3 text-right">ค่าใช้จ่าย</th>
                             </tr>
@@ -3481,12 +3541,34 @@ export default function App() {
                                 </td>
                                 <td className="p-3">
                                   <div className="font-medium">{h.issue}</div>
-                                  <div className="text-xs text-slate-500">
-                                    {h.cause}
-                                  </div>
+                                  {h.cause && (
+                                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                                      <span>📍</span>
+                                      <span>{h.cause}</span>
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-3 text-slate-600">
-                                  {h.repairItems || "-"}
+                                  <div>{h.repairItems || "-"}</div>
+                                  {h.photos && h.photos.length > 0 && (
+                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                      {h.photos.map((url: string, pIdx: number) => (
+                                        <button
+                                          key={pIdx}
+                                          type="button"
+                                          onClick={() => window.open(url, "_blank")}
+                                          className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all shrink-0 bg-slate-100"
+                                          title="คลิกเพื่อดูรูปภาพ"
+                                        >
+                                          <img
+                                            src={url}
+                                            alt="รูปอะไหล่"
+                                            className="w-full h-full object-cover"
+                                          />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-3 text-right font-bold text-slate-700">
                                   {parseInt(h.cost || "0").toLocaleString()}
@@ -3529,30 +3611,157 @@ export default function App() {
   const MaintenanceView = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingLog, setEditingLog] = useState<any>(null);
-    const [maintenanceForm, setMaintenanceForm] = useState({
+    const [searchTerm, setSearchTerm] = useState("");
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [vehicleFilter, setVehicleFilter] = useState("all");
+
+    // Searchable Combobox State for Modal
+    const [vehicleSearchQuery, setVehicleSearchQuery] = useState("");
+    const [isVehicleDropdownOpen, setIsVehicleDropdownOpen] = useState(false);
+    const vehicleComboboxRef = useRef<HTMLDivElement>(null);
+
+    const [maintenanceForm, setMaintenanceForm] = useState<{
+      vehicleId: string;
+      date: string;
+      issue: string;
+      cause: string;
+      repairItems: string;
+      cost: string;
+      status: string;
+      finishDate: string;
+      photos: string[];
+    }>({
       vehicleId: "",
       date: new Date().toISOString().split("T")[0],
       issue: "",
       cause: "",
       repairItems: "",
       cost: "",
-      status: "Pending",
+      status: "InProgress",
       finishDate: "",
+      photos: [],
     });
+
+    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [uploadingCount, setUploadingCount] = useState(0);
+
+    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+    const [lightboxIndex, setLightboxIndex] = useState(0);
+    const [lightboxList, setLightboxList] = useState<string[]>([]);
+
+    const openLightbox = (urls: string[], idx: number) => {
+      setLightboxList(urls);
+      setLightboxIndex(idx);
+      setLightboxUrl(urls[idx]);
+    };
+    const closeLightbox = () => setLightboxUrl(null);
+    const prevPhoto = () => {
+      const i = (lightboxIndex - 1 + lightboxList.length) % lightboxList.length;
+      setLightboxIndex(i);
+      setLightboxUrl(lightboxList[i]);
+    };
+    const nextPhoto = () => {
+      const i = (lightboxIndex + 1) % lightboxList.length;
+      setLightboxIndex(i);
+      setLightboxUrl(lightboxList[i]);
+    };
+
+    const selectedVehicle = useMemo(
+      () => vehicles.find((v) => v.id === maintenanceForm.vehicleId),
+      [vehicles, maintenanceForm.vehicleId]
+    );
+
+    // Filter vehicles for combobox in modal
+    const filteredVehiclesForModal = useMemo(() => {
+      const q = vehicleSearchQuery.trim().toLowerCase();
+      if (!q) return vehicles;
+      // If query matches current selected vehicle text, show full list
+      if (
+        selectedVehicle &&
+        `${selectedVehicle.plate} (${selectedVehicle.type})`.toLowerCase() === q
+      ) {
+        return vehicles;
+      }
+      return vehicles.filter((v) => {
+        const plate = (v.plate || "").toLowerCase();
+        const type = (v.type || "").toLowerCase();
+        const brand = (v.brand || "").toLowerCase();
+        return plate.includes(q) || type.includes(q) || brand.includes(q);
+      });
+    }, [vehicles, vehicleSearchQuery, selectedVehicle]);
+
+    // Handle outside clicks to close combobox dropdown
+    useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+        if (
+          vehicleComboboxRef.current &&
+          !vehicleComboboxRef.current.contains(event.target as Node)
+        ) {
+          setIsVehicleDropdownOpen(false);
+          // Restore text if a vehicle is selected
+          if (maintenanceForm.vehicleId) {
+            const current = vehicles.find((v) => v.id === maintenanceForm.vehicleId);
+            if (current) {
+              setVehicleSearchQuery(`${current.plate} (${current.type})`);
+            }
+          } else {
+            // If user typed exact plate, auto-select it
+            const exact = vehicles.find(
+              (v) =>
+                v.plate?.toLowerCase() === vehicleSearchQuery.trim().toLowerCase()
+            );
+            if (exact) {
+              setMaintenanceForm((prev) => ({ ...prev, vehicleId: exact.id }));
+              setVehicleSearchQuery(`${exact.plate} (${exact.type})`);
+            } else {
+              setVehicleSearchQuery("");
+            }
+          }
+        }
+      };
+      if (isVehicleDropdownOpen) {
+        document.addEventListener("mousedown", handleClickOutside);
+      }
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }, [isVehicleDropdownOpen, maintenanceForm.vehicleId, vehicles, vehicleSearchQuery]);
+
+    const handleSelectVehicle = (v: any) => {
+      setMaintenanceForm((prev) => ({ ...prev, vehicleId: v.id }));
+      setVehicleSearchQuery(`${v.plate} (${v.type})`);
+      setIsVehicleDropdownOpen(false);
+    };
+
+    const handleClearVehicle = () => {
+      setMaintenanceForm((prev) => ({ ...prev, vehicleId: "" }));
+      setVehicleSearchQuery("");
+      setIsVehicleDropdownOpen(true);
+    };
 
     const openModal = (log: any = null) => {
       setEditingLog(log);
       if (log) {
+        const vId = log.vehicleId || "";
+        const rawPhotos: string[] = Array.isArray(log.photos)
+          ? log.photos
+          : log.photo
+          ? [log.photo]
+          : [];
         setMaintenanceForm({ 
-          vehicleId: log.vehicleId || "",
+          vehicleId: vId,
           date: log.date || new Date().toISOString().split("T")[0],
           issue: log.issue || "",
           cause: log.cause || "",
           repairItems: log.repairItems || "",
-          cost: log.cost || "",
-          status: log.status || "Pending",
+          cost: log.cost != null ? String(log.cost) : "",
+          status: log.status === "Completed" ? "Completed" : "InProgress",
           finishDate: log.finishDate || "",
+          photos: rawPhotos,
         });
+        const currentV = vehicles.find((v) => v.id === vId);
+        setVehicleSearchQuery(currentV ? `${currentV.plate} (${currentV.type})` : "");
       } else {
         setMaintenanceForm({
           vehicleId: "",
@@ -3561,30 +3770,86 @@ export default function App() {
           cause: "",
           repairItems: "",
           cost: "",
-          status: "Pending",
+          status: "InProgress",
           finishDate: "",
+          photos: [],
         });
+        setVehicleSearchQuery("");
       }
+      setIsUploadingPhoto(false);
+      setUploadProgress(0);
+      setUploadingCount(0);
+      setIsVehicleDropdownOpen(false);
       setIsModalOpen(true);
     };
 
+    const handleMaintenancePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      const oversized = files.filter((f) => f.size > 10 * 1024 * 1024);
+      if (oversized.length > 0) {
+        return alert(`ไฟล์ ${oversized.map((f) => f.name).join(", ")} มีขนาดใหญ่เกิน 10MB`);
+      }
+      setIsUploadingPhoto(true);
+      setUploadingCount(files.length);
+      setUploadProgress(0);
+      e.target.value = "";
+      try {
+        const urls = await Promise.all(
+          files.map((f) => uploadImageToStorage(f, "maintenance", setUploadProgress))
+        );
+        setMaintenanceForm((prev) => ({
+          ...prev,
+          photos: [...(prev.photos || []), ...urls],
+        }));
+      } catch (err: any) {
+        console.error("Maintenance photo upload error:", err);
+        alert("อัพโหลดรูปภาพไม่สำเร็จ: " + (err?.message || "กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือสิทธิ์"));
+      } finally {
+        setIsUploadingPhoto(false);
+        setUploadingCount(0);
+      }
+    };
+
+    const handleRemovePhoto = (indexToRemove: number) => {
+      setMaintenanceForm((prev) => ({
+        ...prev,
+        photos: (prev.photos || []).filter((_, i) => i !== indexToRemove),
+      }));
+    };
+
     const handleSaveMaintenance = async () => {
-      if (!maintenanceForm.vehicleId) return alert("กรุณาเลือกทะเบียนรถ");
+      if (isUploadingPhoto) {
+        return alert("กรุณารออัพโหลดรูปภาพให้เสร็จสิ้นก่อนกดบันทึกข้อมูล");
+      }
+      let finalVehicleId = maintenanceForm.vehicleId;
+      if (!finalVehicleId && vehicleSearchQuery.trim()) {
+        const match = vehicles.find(
+          (v) =>
+            v.plate?.toLowerCase() === vehicleSearchQuery.trim().toLowerCase() ||
+            `${v.plate} (${v.type})`.toLowerCase() === vehicleSearchQuery.trim().toLowerCase()
+        );
+        if (match) {
+          finalVehicleId = match.id;
+        }
+      }
+      if (!finalVehicleId) return alert("กรุณาเลือกทะเบียนรถ");
       const payload = {
         ...maintenanceForm,
+        vehicleId: finalVehicleId,
         cost: parseFloat(maintenanceForm.cost) || 0,
       };
       if (editingLog) {
         await updateData("maintenance_logs", editingLog.id, payload);
         logActivity(
           "Edit Maintenance",
-          `Edited maintenance log for vehicle ID: ${maintenanceForm.vehicleId}`
+          `Edited maintenance log for vehicle ID: ${finalVehicleId}`
         );
       } else {
         await addData("maintenance_logs", payload);
         logActivity(
           "Add Maintenance",
-          `Added maintenance log for vehicle ID: ${maintenanceForm.vehicleId}`
+          `Added maintenance log for vehicle ID: ${finalVehicleId}`
         );
       }
       setIsModalOpen(false);
@@ -3597,189 +3862,622 @@ export default function App() {
       }
     };
 
+    // --- METRICS ---
+    const totalCount = maintenanceLogs.length;
+    const inProgressCount = maintenanceLogs.filter((m) => m.status === "InProgress").length;
+    const pendingCount = maintenanceLogs.filter((m) => m.status === "Pending").length;
+    const completedCount = maintenanceLogs.filter((m) => m.status === "Completed").length;
+    const totalCost = useMemo(() => {
+      return maintenanceLogs.reduce((acc, m) => acc + (parseFloat(m.cost) || 0), 0);
+    }, [maintenanceLogs]);
+
+    // --- FILTERED LOGS ---
+    const filteredLogs = useMemo(() => {
+      return maintenanceLogs.filter((m) => {
+        const vName = getVehicleName(m.vehicleId) || "";
+        const q = searchTerm.toLowerCase().trim();
+        const matchSearch =
+          !q ||
+          vName.toLowerCase().includes(q) ||
+          (m.issue && m.issue.toLowerCase().includes(q)) ||
+          (m.cause && m.cause.toLowerCase().includes(q)) ||
+          (m.repairItems && m.repairItems.toLowerCase().includes(q)) ||
+          (m.date && m.date.includes(q));
+
+        const matchStatus = statusFilter === "all" || m.status === statusFilter;
+        const matchVehicle = vehicleFilter === "all" || m.vehicleId === vehicleFilter;
+        return matchSearch && matchStatus && matchVehicle;
+      });
+    }, [maintenanceLogs, searchTerm, statusFilter, vehicleFilter, vehicles]);
+
     return (
-      <div className="space-y-8 p-2">
-        <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <div className="bg-orange-100 p-2.5 rounded-xl text-orange-600 inline-flex">
-              <Wrench size={28} />
+      <div className="space-y-6 animate-fade-in">
+        {/* Header Row */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)]">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 border border-orange-200/80 flex items-center justify-center">
+              <Wrench size={24} className="stroke-[2.2]" />
             </div>
-            ประวัติการซ่อมบำรุง
-          </h2>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                ประวัติการซ่อมบำรุง
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                บันทึกและติดตามสถานะงานซ่อมบำรุง เครื่องจักรและยานพาหนะทั้งหมด
+              </p>
+            </div>
+          </div>
           <button
             onClick={() => openModal()}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2 hover:bg-blue-700 shadow-sm transition-all"
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2.5 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99]"
           >
-            <Plus size={18} /> แจ้งซ่อม/บันทึกประวัติ
+            <Plus size={18} className="stroke-[2.5]" />
+            <span>แจ้งซ่อม / บันทึกประวัติ</span>
           </button>
         </div>
 
-        <Card className="p-6">
+        {/* 4 KPI Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Total */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                <Wrench size={18} />
+              </div>
+              <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                ทั้งหมด
+              </span>
+            </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold text-slate-900 font-mono tracking-tight">
+                {totalCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                รายการแจ้งซ่อมในระบบ
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: In Progress / Pending */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 relative">
+                <Clock size={18} />
+                {(inProgressCount + pendingCount) > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                )}
+              </div>
+              <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200/60">
+                รอดำเนินการ
+              </span>
+            </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold text-slate-900 font-mono tracking-tight">
+                {inProgressCount + pendingCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                กำลังซ่อม ({inProgressCount}) • รอซ่อม ({pendingCount})
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Completed */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                <CheckCircle size={18} />
+              </div>
+              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
+                สำเร็จแล้ว
+              </span>
+            </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold text-slate-900 font-mono tracking-tight">
+                {completedCount}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                ซ่อมเสร็จพร้อมใช้งาน
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: Total Expense */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] hover:shadow-[0_4px_16px_rgba(15,23,42,0.08)] transition-all">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                <Fuel size={18} />
+              </div>
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60">
+                งบซ่อมรวม
+              </span>
+            </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold text-slate-900 font-mono tracking-tight">
+                ฿{totalCost.toLocaleString()}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                ค่าอะไหล่และค่าบริการรวม
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter and Search Bar */}
+        <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Search Input */}
+          <div className="relative flex-1 max-w-md">
+            <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="ค้นหาทะเบียน, อาการเสีย, สถานที่ซ่อม, อะไหล่..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-9 py-2 text-sm bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200/90 rounded-xl text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          {/* Status Filter Buttons */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-0.5">
+            <button
+              onClick={() => setStatusFilter("all")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                statusFilter === "all"
+                  ? "bg-slate-800 text-white shadow-sm"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              ทั้งหมด ({totalCount})
+            </button>
+            <button
+              onClick={() => setStatusFilter("InProgress")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                statusFilter === "InProgress"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-blue-700 bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200/60"
+              }`}
+            >
+              🔵 กำลังซ่อม ({inProgressCount})
+            </button>
+            {pendingCount > 0 && (
+              <button
+                onClick={() => setStatusFilter("Pending")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                  statusFilter === "Pending"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "text-amber-700 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200/60"
+                }`}
+              >
+                🟡 รอการซ่อม ({pendingCount})
+              </button>
+            )}
+            <button
+              onClick={() => setStatusFilter("Completed")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                statusFilter === "Completed"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-emerald-700 bg-emerald-50/80 hover:bg-emerald-100/80 border border-emerald-200/60"
+              }`}
+            >
+              🟢 ซ่อมเสร็จแล้ว ({completedCount})
+            </button>
+          </div>
+        </div>
+
+        {/* Table Card */}
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-[0_2px_12px_rgba(15,23,42,0.04)] overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="bg-slate-50 text-slate-700 border-b text-sm">
+              <thead className="bg-slate-50/90 text-slate-600 border-b border-slate-200/80 text-xs font-semibold uppercase tracking-wider">
                 <tr>
-                  <th className="p-3">วันที่แจ้ง</th>
-                  <th className="p-3">ทะเบียนรถ</th>
-                  <th className="p-3">อาการเสีย/สาเหตุ/รายการซ่อม</th>
-                  <th className="p-3">สถานะ</th>
-                  <th className="p-3">เสร็จสิ้น</th>
-                  <th className="p-3 text-right">ค่าใช้จ่าย</th>
-                  <th className="p-3 text-center">จัดการ</th>
+                  <th className="p-4 whitespace-nowrap">วันที่แจ้ง</th>
+                  <th className="p-4 whitespace-nowrap">ทะเบียนรถ</th>
+                  <th className="p-4 min-w-[240px]">อาการเสีย / สถานที่ซ่อม / รายการซ่อม</th>
+                  <th className="p-4 whitespace-nowrap">สถานะ</th>
+                  <th className="p-4 whitespace-nowrap">เสร็จสิ้น</th>
+                  <th className="p-4 whitespace-nowrap text-right">ค่าใช้จ่าย</th>
+                  <th className="p-4 whitespace-nowrap text-center">จัดการ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y text-sm">
-                {maintenanceLogs.map((m) => (
-                  <tr key={m.id} className="hover:bg-slate-50">
-                    <td className="p-3 align-top whitespace-nowrap">
-                      {m.date}
-                    </td>
-                    <td className="p-3 align-top font-medium">
-                      {getVehicleName(m.vehicleId)}
-                    </td>
-                    <td className="p-3 align-top">
-                      <div className="font-medium text-slate-800">
-                        {m.issue}
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredLogs.map((m) => (
+                  <tr
+                    key={m.id}
+                    className="hover:bg-slate-50/70 transition-colors"
+                  >
+                    <td className="p-4 align-top whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 text-xs font-mono text-slate-500">
+                        <Calendar size={13} className="text-slate-400" />
+                        <span>{m.date}</span>
                       </div>
-                      <div className="text-xs text-slate-500">{m.cause}</div>
+                    </td>
+                    <td className="p-4 align-top">
+                      <div className="inline-flex items-center gap-2 bg-slate-100/90 text-slate-700 border border-slate-200/80 px-2.5 py-1 rounded-lg font-semibold text-xs">
+                        <Truck size={14} className="text-blue-600 shrink-0" />
+                        <span>{getVehicleName(m.vehicleId)}</span>
+                      </div>
+                    </td>
+                    <td className="p-4 align-top">
+                      <div className="font-semibold text-slate-800 text-sm">
+                        {m.issue || "-"}
+                      </div>
+                      {m.cause && (
+                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                          <span>📍</span>
+                          <span>{m.cause}</span>
+                        </div>
+                      )}
                       {m.repairItems && (
-                        <div className="text-xs text-slate-400 mt-1 border-t border-slate-100 pt-1">
-                          🛠️ {m.repairItems}
+                        <div className="text-xs text-amber-800 bg-amber-50/90 border border-amber-200/70 px-2.5 py-0.5 rounded-md mt-1.5 inline-flex items-center gap-1 font-medium">
+                          <span>🛠️</span>
+                          <span>{m.repairItems}</span>
+                        </div>
+                      )}
+                      {m.photos && m.photos.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                          {m.photos.map((url: string, pIdx: number) => (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={() => openLightbox(m.photos, pIdx)}
+                              className="group relative w-8 h-8 rounded-lg overflow-hidden border border-slate-200/90 shadow-xs hover:ring-2 hover:ring-blue-500 transition-all shrink-0 bg-slate-100"
+                              title="คลิกเพื่อดูรูปภาพขนาดเต็ม"
+                            >
+                              <img
+                                src={url}
+                                alt={`รูปอะไหล่ที่ ${pIdx + 1}`}
+                                className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                              />
+                            </button>
+                          ))}
                         </div>
                       )}
                     </td>
-                    <td className="p-3 align-top">
-                      <Badge status={m.status} type="maintenance" />
+                    <td className="p-4 align-top whitespace-nowrap">
+                      <MaintenanceStatusBadge status={m.status} />
                     </td>
-                    <td className="p-3 align-top whitespace-nowrap">
-                      {m.finishDate || "-"}
+                    <td className="p-4 align-top whitespace-nowrap font-mono text-xs text-slate-500">
+                      {m.finishDate ? (
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium">
+                          <CheckCircle size={13} /> {m.finishDate}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
                     </td>
-                    <td className="p-3 align-top text-right font-bold text-slate-700">
-                      {parseInt(m.cost || 0).toLocaleString()}
+                    <td className="p-4 align-top text-right whitespace-nowrap">
+                      <div className="text-sm font-bold text-slate-800 font-mono">
+                        {parseInt(m.cost || 0) > 0 ? `฿${parseInt(m.cost).toLocaleString()}` : "-"}
+                      </div>
                     </td>
-                    <td className="p-3 align-top text-center">
-                      <div className="flex justify-center gap-2">
+                    <td className="p-4 align-top text-center whitespace-nowrap">
+                      <div className="flex justify-center items-center gap-1.5">
                         <button
                           onClick={() => openModal(m)}
-                          className="text-blue-600 hover:bg-blue-50 p-1 rounded"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 transition-all"
+                          title="แก้ไข"
                         >
-                          <Pencil size={14} />
+                          <Pencil size={15} />
                         </button>
                         <button
                           onClick={() => handleDelete(m.id)}
-                          className="text-red-600 hover:bg-red-50 p-1 rounded"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all"
+                          title="ลบ"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>
                   </tr>
                 ))}
-                {maintenanceLogs.length === 0 && (
+                {filteredLogs.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-400">
-                      ยังไม่มีข้อมูลการซ่อมบำรุง
+                    <td colSpan={7} className="p-12 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Wrench size={32} className="opacity-30" />
+                        <div className="font-medium text-slate-600">ไม่พบข้อมูลการซ่อมบำรุง</div>
+                        {searchTerm && (
+                          <button
+                            onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}
+                            className="text-xs text-blue-600 hover:underline mt-1"
+                          >
+                            ล้างคำค้นหา
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </Card>
+        </div>
 
+        {/* Modal */}
         {isModalOpen &&
           createPortal(
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[9999] animate-fade-in backdrop-blur-sm overflow-y-auto">
-              <Card className="w-full max-w-2xl max-h-[90vh] my-auto shadow-2xl flex flex-col overflow-hidden">
-              <div className="p-6 border-b flex justify-between items-center bg-slate-50 rounded-t-lg sticky top-0 z-10 shrink-0">
-                <h3 className="text-xl font-bold flex items-center gap-2">
-                  {editingLog ? (
-                    <>✏️ แก้ไขรายการซ่อม</>
-                  ) : (
-                    <>📝 บันทึกการแจ้งซ่อมใหม่</>
-                  )}
-                </h3>
-                <button
-                  onClick={() => setIsModalOpen(false)}
-                  className="text-slate-400 hover:text-slate-600"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-              <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label className="label">🆔 ทะเบียนรถ</label>
-                      <select
-                        className="input-field"
-                        value={maintenanceForm.vehicleId}
-                        onChange={(e) =>
-                          setMaintenanceForm({
-                            ...maintenanceForm,
-                            vehicleId: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="">-- เลือกทะเบียน --</option>
-                        {vehicles.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.plate} ({v.type})
-                          </option>
-                        ))}
-                      </select>
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 z-[9999] animate-fade-in backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200/90 text-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] my-auto shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] flex flex-col overflow-hidden transition-all">
+                {/* Gradient Accent Bar */}
+                <div className="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-500 shrink-0" />
+
+                {/* Header */}
+                <div className="px-6 py-4.5 border-b border-slate-100 flex justify-between items-center bg-white/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
+                      <Wrench size={20} className="stroke-[2.2]" />
                     </div>
                     <div>
-                      <label className="label">📅 วันที่แจ้งซ่อม</label>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                          {editingLog ? "แก้ไขรายการซ่อมบำรุง" : "บันทึกการแจ้งซ่อมใหม่"}
+                        </h3>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                            editingLog
+                              ? "bg-amber-50 text-amber-700 border border-amber-200/60"
+                              : "bg-blue-50 text-blue-700 border border-blue-200/60"
+                          }`}
+                        >
+                          {editingLog ? "แก้ไข" : "สร้างใหม่"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        บันทึกรายละเอียดงานซ่อม อะไหล่ที่เปลี่ยน รูปภาพ และติดตามสถานะ
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 active:scale-95 transition-all"
+                    title="ปิดหน้าต่าง"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-6 space-y-5 flex-1 overflow-y-auto">
+                  {/* Section 1: Vehicle & Date */}
+                  <div className="bg-gradient-to-br from-slate-50/90 via-slate-50 to-slate-100/60 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Searchable Vehicle Combobox */}
+                      <div className="relative z-20" ref={vehicleComboboxRef}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="label mb-0 flex items-center gap-1.5 font-bold text-slate-800 text-xs">
+                            <span>🆔 ทะเบียนรถ</span>
+                            <span className="text-rose-500">*</span>
+                          </label>
+                          {selectedVehicle && (
+                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 flex items-center gap-1">
+                              <Check size={11} className="stroke-[3]" />
+                              <span>เลือกแล้ว</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="relative">
+                          <Search
+                            size={16}
+                            className={`absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none transition-colors ${
+                              isVehicleDropdownOpen ? "text-blue-500" : "text-slate-400"
+                            }`}
+                          />
+                          <input
+                            type="text"
+                            placeholder="พิมพ์ค้นหาทะเบียน หรือ ประเภทรถ..."
+                            value={vehicleSearchQuery}
+                            onFocus={() => setIsVehicleDropdownOpen(true)}
+                            onClick={() => setIsVehicleDropdownOpen(true)}
+                            onChange={(e) => {
+                              setVehicleSearchQuery(e.target.value);
+                              setIsVehicleDropdownOpen(true);
+                              if (!e.target.value) {
+                                setMaintenanceForm((prev) => ({ ...prev, vehicleId: "" }));
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                setIsVehicleDropdownOpen(false);
+                              }
+                            }}
+                            className={`w-full pl-9 pr-16 py-2.5 bg-white border rounded-xl text-sm font-medium text-slate-800 placeholder-slate-400 outline-none transition-all ${
+                              isVehicleDropdownOpen
+                                ? "border-blue-500 ring-2 ring-blue-100 shadow-sm"
+                                : maintenanceForm.vehicleId
+                                ? "border-slate-300 hover:border-slate-400 bg-white"
+                                : "border-slate-300 hover:border-slate-400"
+                            }`}
+                          />
+
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                            {(vehicleSearchQuery || maintenanceForm.vehicleId) && (
+                              <button
+                                type="button"
+                                onClick={handleClearVehicle}
+                                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                title="ล้างการเลือก"
+                              >
+                                <X size={15} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
+                              className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              title="เปิด/ปิด รายการทะเบียน"
+                            >
+                              <ChevronDown
+                                size={16}
+                                className={`transition-transform duration-200 ${
+                                  isVehicleDropdownOpen ? "rotate-180 text-blue-500" : ""
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Searchable Dropdown Popup */}
+                        {isVehicleDropdownOpen && (
+                          <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-60">
+                            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-semibold shrink-0">
+                              <span>
+                                {filteredVehiclesForModal.length > 0
+                                  ? `พบ ${filteredVehiclesForModal.length} คัน`
+                                  : "ไม่พบผลการค้นหา"}
+                              </span>
+                              <span className="text-[10px] text-slate-400">คลิกเพื่อเลือก</span>
+                            </div>
+
+                            <div className="overflow-y-auto divide-y divide-slate-100 flex-1">
+                              {filteredVehiclesForModal.length === 0 ? (
+                                <div className="p-4 text-center text-xs text-slate-400 flex flex-col items-center justify-center gap-1.5">
+                                  <Search size={18} className="text-slate-300" />
+                                  <span>ไม่พบทะเบียนรถที่ตรงกับ "{vehicleSearchQuery}"</span>
+                                  <span className="text-[11px] text-slate-400">
+                                    ลองพิมพ์เลขทะเบียนหรือประเภทรถใหม่
+                                  </span>
+                                </div>
+                              ) : (
+                                filteredVehiclesForModal.map((v) => {
+                                  const isSelected = v.id === maintenanceForm.vehicleId;
+                                  return (
+                                    <button
+                                      key={v.id}
+                                      type="button"
+                                      onClick={() => handleSelectVehicle(v)}
+                                      className={`w-full text-left px-3.5 py-2.5 flex items-center justify-between transition-colors ${
+                                        isSelected
+                                          ? "bg-blue-50/80 text-blue-900 font-medium"
+                                          : "hover:bg-slate-50 text-slate-700"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div
+                                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${
+                                            isSelected
+                                              ? "bg-blue-600 text-white shadow-sm"
+                                              : "bg-slate-100 text-slate-600 border border-slate-200/80"
+                                          }`}
+                                        >
+                                          🚛
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-bold text-sm text-slate-900 truncate">
+                                              {v.plate}
+                                            </span>
+                                            {isSelected && (
+                                              <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
+                                                เลือกอยู่
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 truncate">
+                                            <span className="bg-slate-100 px-1.5 py-0.5 rounded text-[11px] font-medium text-slate-600">
+                                              {v.type || "ไม่ระบุประเภท"}
+                                            </span>
+                                            {v.brand && (
+                                              <span className="text-slate-400 truncate text-[11px]">
+                                                • {v.brand}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {isSelected && (
+                                        <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 ml-2 shadow-sm">
+                                          <Check size={12} className="stroke-[3]" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Date */}
+                      <div>
+                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                          <span>📅 วันที่แจ้งซ่อม</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="input-field bg-white"
+                          value={maintenanceForm.date}
+                          onChange={(e) =>
+                            setMaintenanceForm({
+                              ...maintenanceForm,
+                              date: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Symptoms & Location */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                        <span>⚠️ อาการเสีย</span>
+                      </label>
                       <input
-                        type="date"
+                        type="text"
                         className="input-field"
-                        value={maintenanceForm.date}
+                        placeholder="เช่น บูมสั่นเวลาทำงาน, แอร์ไม่เย็น, เครื่องยนต์ดับกะทันหัน..."
+                        value={maintenanceForm.issue}
                         onChange={(e) =>
                           setMaintenanceForm({
                             ...maintenanceForm,
-                            date: e.target.value,
+                            issue: e.target.value,
                           })
                         }
                       />
                     </div>
+                    <div>
+                      <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                        <span>📍 สถานที่ซ่อม</span>
+                      </label>
+                      <textarea
+                        className="input-field h-20 resize-y"
+                        placeholder="ระบุสถานที่ซ่อม เช่น ศูนย์บริการ, ไซต์งาน, อู่ซ่อม..."
+                        value={maintenanceForm.cause}
+                        onChange={(e) =>
+                          setMaintenanceForm({
+                            ...maintenanceForm,
+                            cause: e.target.value,
+                          })
+                        }
+                      ></textarea>
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-4">
-                  <div>
-                    <label className="label">⚠️ อาการเสีย</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="เช่น แอร์ไม่เย็น"
-                      value={maintenanceForm.issue}
-                      onChange={(e) =>
-                        setMaintenanceForm({
-                          ...maintenanceForm,
-                          issue: e.target.value,
-                        })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="label">🔧 สาเหตุ</label>
+
+                  {/* Section 3: รายการซ่อม/อะไหล่ + แนบรูปภาพ */}
+                  <div className="bg-gradient-to-br from-blue-50/40 via-white to-slate-50/60 p-4.5 rounded-2xl border border-blue-100/90 shadow-xs space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <label className="label mb-0 flex items-center gap-1.5 text-slate-800 font-bold text-xs">
+                        <span>🛠️ รายการซ่อม / อะไหล่ที่เปลี่ยน</span>
+                      </label>
+                      <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                        ระบุรายละเอียดและแนบรูปภาพประกอบ
+                      </span>
+                    </div>
+
                     <textarea
-                      className="input-field h-24"
-                      placeholder="ระบุสาเหตุที่เสีย..."
-                      value={maintenanceForm.cause}
-                      onChange={(e) =>
-                        setMaintenanceForm({
-                          ...maintenanceForm,
-                          cause: e.target.value,
-                        })
-                      }
-                    ></textarea>
-                  </div>
-                  <div>
-                    <label className="label">🛠️ รายการซ่อม/อะไหล่</label>
-                    <textarea
-                      className="input-field h-24"
-                      placeholder="ระบุรายการซ่อมและอะไหล่ที่เปลี่ยน..."
+                      className="input-field min-h-[76px] resize-y bg-white text-sm"
+                      placeholder="ระบุรายการซ่อมและอะไหล่ที่เปลี่ยน เช่น เปลี่ยนถ่ายน้ำมันเครื่อง, เปลี่ยนสายพาน..."
                       value={maintenanceForm.repairItems}
                       onChange={(e) =>
                         setMaintenanceForm({
@@ -3787,74 +4485,300 @@ export default function App() {
                           repairItems: e.target.value,
                         })
                       }
-                    ></textarea>
+                    />
+
+                    {/* Photo Attachment Container */}
+                    <div className="pt-2.5 border-t border-slate-200/70 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                          <Camera size={14} className="text-blue-600" />
+                          <span>แนบรูปภาพอะไหล่ / จุดซ่อม / ใบเสร็จ</span>
+                          {maintenanceForm.photos && maintenanceForm.photos.length > 0 && (
+                            <span className="ml-1 text-[11px] font-semibold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full">
+                              {maintenanceForm.photos.length} รูป
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400">
+                          (สูงสุด 10MB ต่อรูป)
+                        </span>
+                      </div>
+
+                      {/* Photo Grid & Upload Tile */}
+                      <div className="flex flex-wrap gap-2.5 items-center">
+                        {/* Thumbnails */}
+                        {maintenanceForm.photos?.map((url, idx) => (
+                          <div
+                            key={idx}
+                            className="group relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-xs shrink-0 cursor-pointer transition-transform hover:scale-105"
+                          >
+                            <img
+                              src={url}
+                              alt={`รูปอะไหล่ที่ ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                              onClick={() => openLightbox(maintenanceForm.photos, idx)}
+                            />
+                            {/* Hover Overlay */}
+                            <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openLightbox(maintenanceForm.photos, idx);
+                                }}
+                                className="w-6 h-6 rounded-md bg-white/90 text-slate-800 flex items-center justify-center hover:bg-white shadow-xs transition-colors"
+                                title="ดูรูปเต็ม"
+                              >
+                                <Search size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemovePhoto(idx);
+                                }}
+                                className="w-6 h-6 rounded-md bg-rose-600 text-white flex items-center justify-center hover:bg-rose-700 shadow-xs transition-colors"
+                                title="ลบรูป"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Upload Button Tile */}
+                        <label
+                          className={`w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer shrink-0 transition-all ${
+                            isUploadingPhoto
+                              ? "border-blue-300 bg-blue-50/70 cursor-wait"
+                              : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/50 bg-white"
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={handleMaintenancePhotoUpload}
+                            disabled={isUploadingPhoto}
+                          />
+                          {isUploadingPhoto ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                              <span className="text-[10px] font-bold text-blue-600">
+                                {uploadProgress}%
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-600 transition-colors">
+                              <div className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                                <Plus size={14} className="stroke-[3]" />
+                              </div>
+                              <span className="text-[10px] font-semibold">แนบรูปภาพ</span>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+
+                      {isUploadingPhoto && uploadingCount > 1 && (
+                        <p className="text-xs text-blue-600 font-medium">
+                          กำลังอัพโหลด {uploadingCount} รูป... ({uploadProgress}%)
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div>
-                      <label className="label">💰 ค่าใช้จ่าย</label>
+
+                  {/* Section 4: Cost & Status */}
+                  <div className="bg-gradient-to-br from-slate-50/90 via-slate-50 to-slate-100/60 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Cost */}
+                      <div>
+                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                          <span>💰 ค่าใช้จ่าย (บาท)</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                            ฿
+                          </span>
+                          <input
+                            type="number"
+                            className="input-field pl-8 font-mono font-bold text-slate-800 bg-white"
+                            placeholder="0.00"
+                            value={maintenanceForm.cost}
+                            onChange={(e) =>
+                              setMaintenanceForm({
+                                ...maintenanceForm,
+                                cost: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {/* Status */}
+                      <div>
+                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                          <span>📊 สถานะ</span>
+                        </label>
+                        <select
+                          className="input-field font-semibold text-slate-800 bg-white"
+                          value={maintenanceForm.status}
+                          onChange={(e) => {
+                            const newStatus = e.target.value;
+                            setMaintenanceForm({
+                              ...maintenanceForm,
+                              status: newStatus,
+                              finishDate:
+                                newStatus === "Completed" && !maintenanceForm.finishDate
+                                  ? new Date().toISOString().split("T")[0]
+                                  : maintenanceForm.finishDate,
+                            });
+                          }}
+                        >
+                          {MAINTENANCE_STATUS.map((s) => (
+                            <option key={s.value} value={s.value}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Finish Date */}
+                    <div className="mt-4 pt-3 border-t border-slate-200/70">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="label mb-0 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                          <span>✅ วันที่ซ่อมเสร็จ</span>
+                          {maintenanceForm.status === "Completed" && (
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80">
+                              งานเสร็จสมบูรณ์
+                            </span>
+                          )}
+                        </label>
+                      </div>
                       <input
-                        type="number"
-                        className="input-field font-semibold text-blue-700"
-                        placeholder="0.00"
-                        value={maintenanceForm.cost}
+                        type="date"
+                        className={`input-field bg-white transition-all ${
+                          maintenanceForm.status === "Completed"
+                            ? "border-emerald-400 ring-2 ring-emerald-50 bg-emerald-50/20"
+                            : ""
+                        }`}
+                        value={maintenanceForm.finishDate}
                         onChange={(e) =>
                           setMaintenanceForm({
                             ...maintenanceForm,
-                            cost: e.target.value,
+                            finishDate: e.target.value,
                           })
                         }
                       />
                     </div>
-                    <div>
-                      <label className="label">📊 สถานะ</label>
-                      <select
-                        className="input-field"
-                        value={maintenanceForm.status}
-                        onChange={(e) =>
-                          setMaintenanceForm({
-                            ...maintenanceForm,
-                            status: e.target.value,
-                          })
-                        }
-                      >
-                        {MAINTENANCE_STATUS.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </div>
-                  <div className="mt-4">
-                    <label className="label">✅ วันที่ซ่อมเสร็จ</label>
-                    <input
-                      type="date"
-                      className="input-field"
-                      value={maintenanceForm.finishDate}
-                      onChange={(e) =>
-                        setMaintenanceForm({
-                          ...maintenanceForm,
-                          finishDate: e.target.value,
-                        })
-                      }
-                    />
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-slate-200/80 bg-slate-50/90 backdrop-blur-md flex items-center justify-between gap-3 rounded-b-3xl shrink-0">
+                  <div className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span>ตรวจสอบข้อมูลและรูปภาพก่อนกดบันทึก</span>
+                  </div>
+                  <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-sm font-semibold transition-all active:scale-95 shadow-xs"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveMaintenance}
+                      disabled={isUploadingPhoto}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-bold shadow-md shadow-blue-500/25 flex items-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isUploadingPhoto ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>กำลังอัพโหลดรูป...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save size={16} className="stroke-[2.5]" />
+                          <span>บันทึกข้อมูล</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
-              <div className="p-6 border-t bg-slate-50 flex justify-end gap-3 rounded-b-lg shrink-0">
-                <button
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                >
-                  ยกเลิก
-                </button>
-                <button onClick={handleSaveMaintenance} className="btn-primary">
-                  บันทึกข้อมูล
-                </button>
-              </div>
-              </Card>
+            </div>,
+            document.body
+          )}
+
+        {/* Lightbox Modal for Maintenance Photos */}
+        {lightboxUrl &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center animate-fade-in backdrop-blur-sm"
+              onClick={closeLightbox}
+            >
+              <button
+                type="button"
+                onClick={closeLightbox}
+                className="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10 transition-colors"
+                title="ปิด"
+              >
+                ×
+              </button>
+              {lightboxList.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      prevPhoto();
+                    }}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10 transition-colors"
+                    title="รูปก่อนหน้า"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      nextPhoto();
+                    }}
+                    className="absolute right-14 top-1/2 -translate-y-1/2 text-white bg-white/20 hover:bg-white/30 rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold z-10 transition-colors"
+                    title="รูปถัดไป"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
+              <img
+                src={lightboxUrl}
+                alt="ดูรูปใหญ่"
+                className="max-w-[90vw] max-h-[88vh] object-contain rounded-2xl shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {lightboxList.length > 1 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-sm">
+                  {lightboxList.map((_, i) => (
+                    <button
+                      type="button"
+                      key={i}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLightboxIndex(i);
+                        setLightboxUrl(lightboxList[i]);
+                      }}
+                      className={`w-2.5 h-2.5 rounded-full transition-all ${
+                        i === lightboxIndex ? "bg-white scale-125" : "bg-white/40 hover:bg-white/70"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>,
             document.body
           )}
@@ -4218,13 +5142,13 @@ export default function App() {
   // --- RENDER ---
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
         <style>{styleTags}</style>
         <div className="flex flex-col items-center gap-4 text-slate-400">
-          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500 shadow-inner">
+          <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-center text-blue-400 shadow-inner">
             <Truck size={32} />
           </div>
-          <p className="text-sm font-medium animate-fade-in">กำลังโหลด...</p>
+          <p className="text-sm font-medium animate-fade-in">กำลังโหลดระบบ...</p>
         </div>
       </div>
     );
@@ -4244,7 +5168,7 @@ export default function App() {
   ).length;
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans text-slate-800 flex-col">
+    <div className="flex min-h-screen bg-[#f1f5f9] text-slate-800 font-sans flex-col">
       <style>{styleTags}</style>
 
       {viewReport && (
@@ -4256,61 +5180,74 @@ export default function App() {
         />
       )}
 
-      <header className="bg-white shadow-md z-20 border-b border-slate-200 sticky top-0">
-        <div className="flex justify-between items-center px-6 py-3">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 text-white p-2 rounded-lg shadow-blue-600/30 shadow-lg">
-              <Truck size={24} />
+      <header className="bg-white shadow-[0_1px_4px_rgba(15,23,42,0.04)] z-20 border-b border-slate-200/90 sticky top-0">
+        <div className="flex justify-between items-center px-6 py-3.5">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-xl shadow-sm flex items-center justify-center">
+              <Truck size={22} className="stroke-[2.2]" />
             </div>
             <div>
-              <h1 className="text-xl font-extrabold text-slate-800 tracking-tight">
-                CMG EQM
-              </h1>
-              <div className="text-[10px] font-bold text-slate-400">
-                MANAGEMENT SYSTEM
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                  CMG EQM
+                </h1>
+                <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700 border border-blue-200/80 px-2 py-0.5 rounded-full">
+                  PRO
+                </span>
+              </div>
+              <div className="text-[10px] font-semibold tracking-wider text-slate-400">
+                EQUIPMENT MANAGEMENT SYSTEM
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {user.role === "Admin" && (
               <div
-                className="relative cursor-pointer mr-2"
+                className="relative cursor-pointer p-2.5 rounded-xl hover:bg-slate-100 border border-slate-200/80 transition-colors"
                 onClick={() => setActiveTab("dashboard")}
+                title="การแจ้งเตือน"
               >
                 <Bell
-                  size={28}
+                  size={18}
                   className="text-slate-600 hover:text-blue-600 transition-colors"
                 />
                 {newBreakdownCount > 0 && (
-                  <div className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center strobe-anim shadow-md border-2 border-white">
+                  <div className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center strobe-anim shadow-sm border-2 border-white">
                     {newBreakdownCount}
                   </div>
                 )}
               </div>
             )}
-            <div className="text-right hidden sm:block">
-              <div className="font-bold text-slate-800">{user.name}</div>
-              <div className="text-xs text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded-full inline-block">
-                {user.role}
+            <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                {user.name ? user.name.slice(0, 2).toUpperCase() : "U"}
+              </div>
+              <div className="text-right hidden sm:block">
+                <div className="font-bold text-sm text-slate-800 leading-tight">{user.name}</div>
+                <div className="text-[11px] font-medium text-slate-500 flex items-center justify-end gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  {user.role}
+                </div>
               </div>
             </div>
             <button
               onClick={() => { clearSession(); setUser(null); }}
-              className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
+              className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors ml-1"
+              title="ออกจากระบบ"
             >
-              <LogOut size={20} />
+              <LogOut size={18} />
             </button>
           </div>
         </div>
 
-        <div className="flex overflow-x-auto px-6 py-2 gap-2 bg-white border-t border-slate-100 scrollbar-hide">
+        <div className="flex overflow-x-auto px-6 py-2.5 gap-2 bg-slate-50/90 border-t border-slate-200/80 scrollbar-hide">
           {(user.role === "Admin" || user.role === "Driver") && (
             <NavButton
               icon={LayoutDashboard}
               label="ภาพรวม"
               active={activeTab === "dashboard"}
               onClick={() => setActiveTab("dashboard")}
-              activeBg="bg-slate-700 text-white shadow-lg shadow-slate-700/25"
+              activeBg="bg-slate-800 text-white shadow-sm"
             />
           )}
 
@@ -4319,7 +5256,7 @@ export default function App() {
             label="รายงานประจำวัน"
             active={activeTab === "daily"}
             onClick={() => setActiveTab("daily")}
-            activeBg="bg-blue-600 text-white shadow-lg shadow-blue-600/25"
+            activeBg="bg-blue-600 text-white shadow-sm"
           />
           {user.role !== "Driver" && (
             <>
@@ -4328,28 +5265,28 @@ export default function App() {
                 label="ทะเบียนรถ"
                 active={activeTab === "fleet"}
                 onClick={() => setActiveTab("fleet")}
-                activeBg="bg-emerald-600 text-white shadow-lg shadow-emerald-600/25"
+                activeBg="bg-emerald-600 text-white shadow-sm"
               />
               <NavButton
                 icon={Briefcase}
                 label="โครงการ"
                 active={activeTab === "projects"}
                 onClick={() => setActiveTab("projects")}
-                activeBg="bg-amber-600 text-white shadow-lg shadow-amber-600/25"
+                activeBg="bg-amber-600 text-white shadow-sm"
               />
               <NavButton
                 icon={Wrench}
                 label="ซ่อมบำรุง"
                 active={activeTab === "maintenance"}
                 onClick={() => setActiveTab("maintenance")}
-                activeBg="bg-orange-600 text-white shadow-lg shadow-orange-600/25"
+                activeBg="bg-orange-500 text-white shadow-sm font-bold"
               />
               <NavButton
                 icon={User}
                 label="คนขับ"
                 active={activeTab === "drivers"}
                 onClick={() => setActiveTab("drivers")}
-                activeBg="bg-violet-600 text-white shadow-lg shadow-violet-600/25"
+                activeBg="bg-violet-600 text-white shadow-sm"
               />
             </>
           )}
@@ -4360,13 +5297,13 @@ export default function App() {
               active={activeTab === "admin_users"}
               onClick={() => setActiveTab("admin_users")}
               className="ml-auto"
-              activeBg="bg-indigo-600 text-white shadow-lg shadow-indigo-600/25"
+              activeBg="bg-indigo-600 text-white shadow-sm"
             />
           )}
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto bg-slate-50 p-4 md:p-8">
+      <main className="flex-1 overflow-auto p-4 md:p-8 bg-[#f1f5f9]">
         <div className="max-w-7xl mx-auto animate-fade-in">
           {activeTab === "dashboard" && (user.role === "Admin" || user.role === "Driver") && (
             <DashboardView />
