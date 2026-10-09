@@ -3558,7 +3558,14 @@ export default function App() {
                                     <div className="space-y-1">
                                       {h.repairItemList.map((it: any, i: number) => (
                                         <div key={i} className="text-xs flex items-center justify-between gap-2">
-                                          <span className="text-slate-700 font-medium">• {it.name}</span>
+                                          <span className="text-slate-700 font-medium">
+                                            • {it.name}
+                                            {(it.quantity || it.unit) && (
+                                              <span className="text-slate-500 font-normal ml-1">
+                                                ({[it.quantity, it.unit].filter(Boolean).join(" ")})
+                                              </span>
+                                            )}
+                                          </span>
                                           {it.price && (
                                             <span className="font-mono text-emerald-600 font-semibold shrink-0">
                                               ฿{Number(it.price).toLocaleString()}
@@ -3658,7 +3665,7 @@ export default function App() {
       issue: string;
       cause: string;
       repairItems: string;
-      repairItemList: Array<{ name: string; price: string }>;
+      repairItemList: Array<{ name: string; quantity: string; unit: string; price: string }>;
       cost: string;
       status: string;
       finishDate: string;
@@ -3669,7 +3676,7 @@ export default function App() {
       issue: "",
       cause: "",
       repairItems: "",
-      repairItemList: [{ name: "", price: "" }],
+      repairItemList: [{ name: "", quantity: "", unit: "", price: "" }],
       cost: "",
       status: "InProgress",
       finishDate: "",
@@ -3704,7 +3711,7 @@ export default function App() {
     const handleAddRepairItem = () => {
       setMaintenanceForm((prev) => ({
         ...prev,
-        repairItemList: [...(prev.repairItemList || []), { name: "", price: "" }],
+        repairItemList: [...(prev.repairItemList || []), { name: "", quantity: "", unit: "", price: "" }],
       }));
     };
 
@@ -3720,7 +3727,7 @@ export default function App() {
       });
     };
 
-    const handleRepairItemChange = (index: number, field: "name" | "price", value: string) => {
+    const handleRepairItemChange = (index: number, field: "name" | "quantity" | "unit" | "price", value: string) => {
       setMaintenanceForm((prev) => {
         const nextList = [...(prev.repairItemList || [])];
         nextList[index] = { ...nextList[index], [field]: value };
@@ -3830,10 +3837,12 @@ export default function App() {
           : log.photo
           ? [log.photo]
           : [];
-        let initialRepairList: Array<{ name: string; price: string }> = [];
+        let initialRepairList: Array<{ name: string; quantity: string; unit: string; price: string }> = [];
         if (Array.isArray(log.repairItemList) && log.repairItemList.length > 0) {
           initialRepairList = log.repairItemList.map((it: any) => ({
             name: it.name || "",
+            quantity: it.quantity != null ? String(it.quantity) : "",
+            unit: it.unit || "",
             price: it.price != null ? String(it.price) : "",
           }));
         } else if (log.repairItems && typeof log.repairItems === "string" && log.repairItems.trim()) {
@@ -3841,12 +3850,14 @@ export default function App() {
           if (parts.length > 0) {
             initialRepairList = parts.map((part: string) => ({
               name: part.replace(/\s*\([\d,.]+\s*บ\.\)$/, "").trim(),
+              quantity: "",
+              unit: "",
               price: "",
             }));
           }
         }
         if (initialRepairList.length === 0) {
-          initialRepairList = [{ name: "", price: "" }];
+          initialRepairList = [{ name: "", quantity: "", unit: "", price: "" }];
         }
         setMaintenanceForm({ 
           vehicleId: vId,
@@ -3869,7 +3880,7 @@ export default function App() {
           issue: "",
           cause: "",
           repairItems: "",
-          repairItemList: [{ name: "", price: "" }],
+          repairItemList: [{ name: "", quantity: "", unit: "", price: "" }],
           cost: "",
           status: "InProgress",
           finishDate: "",
@@ -3937,11 +3948,15 @@ export default function App() {
       if (!finalVehicleId) return alert("กรุณาเลือกทะเบียนรถ");
 
       const cleanRepairList = (maintenanceForm.repairItemList || []).filter(
-        (it) => it.name.trim() !== "" || (it.price || "").trim() !== ""
+        (it) => it.name.trim() !== "" || (it.price || "").trim() !== "" || (it.quantity || "").trim() !== ""
       );
       const repairItemsSummary = cleanRepairList
         .filter((it) => it.name.trim())
-        .map((it) => (it.price ? `${it.name.trim()} (${Number(it.price).toLocaleString()} บ.)` : it.name.trim()))
+        .map((it) => {
+          const qtyPart = it.quantity?.trim() ? ` ${it.quantity.trim()}${it.unit?.trim() ? ` ${it.unit.trim()}` : ""}` : "";
+          const pricePart = it.price ? ` (${Number(it.price).toLocaleString()} บ.)` : "";
+          return `${it.name.trim()}${qtyPart}${pricePart}`;
+        })
         .join(", ");
 
       const payload = {
@@ -4236,6 +4251,11 @@ export default function App() {
                               className="text-xs text-amber-900 bg-amber-50/90 border border-amber-200/80 px-2 py-0.5 rounded-md inline-flex items-center gap-1.5 font-medium"
                             >
                               <span>🛠️ {it.name}</span>
+                              {(it.quantity || it.unit) && (
+                                <span className="text-amber-700/80 text-[11px] font-normal">
+                                  ({[it.quantity, it.unit].filter(Boolean).join(" ")})
+                                </span>
+                              )}
                               {it.price && (
                                 <span className="text-emerald-700 font-bold font-mono text-[11px] bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60">
                                   ฿{Number(it.price).toLocaleString()}
@@ -4627,51 +4647,80 @@ export default function App() {
                         <span className="font-bold text-slate-900 text-sm">
                           🛠️ รายการซ่อม / อะไหล่ที่เปลี่ยน
                         </span>
-                        {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim()).length > 0 && (
+                        {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim() || it.quantity.trim()).length > 0 && (
                           <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
-                            {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim()).length} รายการ
+                            {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim() || it.quantity.trim()).length} รายการ
                           </span>
                         )}
                       </div>
                     </div>
 
                     {/* Table Header Labels */}
-                    <div className="hidden sm:flex items-center gap-2 px-1 text-[11px] font-bold text-slate-400 select-none">
-                      <span className="w-6 text-center">#</span>
-                      <span className="flex-1">รายการซ่อม / อะไหล่</span>
-                      <span className="w-36 text-right pr-2">ราคา (บาท)</span>
-                      <span className="w-8 text-center">ลบ</span>
+                    <div
+                      style={{ display: "grid", gridTemplateColumns: "24px 1fr 80px 80px 120px 32px" }}
+                      className="gap-2 px-1 text-[11px] font-bold text-slate-400 select-none items-center"
+                    >
+                      <span className="text-center">#</span>
+                      <span>รายการซ่อม / อะไหล่</span>
+                      <span className="text-center">จำนวน</span>
+                      <span className="text-center">หน่วย</span>
+                      <span className="text-right pr-2">ราคา (บาท)</span>
+                      <span className="text-center">ลบ</span>
                     </div>
 
-                    {/* Flat Rows: Clean & Border-Clutter Free */}
+                    {/* Flat Rows: Strictly fits inside Modal */}
                     <div className="space-y-2">
                       {maintenanceForm.repairItemList.map((item, index) => (
-                        <div key={index} className="flex items-center gap-2">
+                        <div
+                          key={index}
+                          style={{ display: "grid", gridTemplateColumns: "24px 1fr 80px 80px 120px 32px" }}
+                          className="gap-2 items-center"
+                        >
                           {/* Index */}
-                          <span className="w-6 text-center font-mono font-bold text-xs text-slate-400 select-none shrink-0">
+                          <span className="text-center font-mono font-bold text-xs text-slate-400 select-none">
                             {index + 1}
                           </span>
 
                           {/* Item Name */}
                           <input
                             type="text"
-                            className="flex-1 input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
-                            placeholder={`ระบุรายการที่ ${index + 1} เช่น เปลี่ยนน้ำมันเครื่อง, กรองโซล่า...`}
+                            className="w-full min-w-0 px-3 py-2 text-sm bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-300 rounded-lg outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 placeholder-slate-400 transition-all"
+                            placeholder={`ระบุรายการ เช่น น้ำมันเครื่อง, กรองโซล่า...`}
                             value={item.name}
                             onChange={(e) => handleRepairItemChange(index, "name", e.target.value)}
                           />
 
-                          {/* Price with single clean input */}
-                          <div className="relative w-36 shrink-0">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs pointer-events-none select-none">
+                          {/* Quantity */}
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            className="w-full px-2 py-2 text-sm text-center font-medium bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-300 rounded-lg outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 placeholder-slate-300 transition-all"
+                            placeholder="จำนวน"
+                            value={item.quantity}
+                            onChange={(e) => handleRepairItemChange(index, "quantity", e.target.value)}
+                          />
+
+                          {/* Unit */}
+                          <input
+                            type="text"
+                            className="w-full px-2 py-2 text-sm text-center font-medium bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-300 rounded-lg outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 placeholder-slate-300 transition-all"
+                            placeholder="หน่วย"
+                            value={item.unit}
+                            onChange={(e) => handleRepairItemChange(index, "unit", e.target.value)}
+                          />
+
+                          {/* Price with currency prefix */}
+                          <div className="relative w-full">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs pointer-events-none select-none">
                               ฿
                             </span>
                             <input
                               type="number"
                               min="0"
                               step="any"
-                              style={{ paddingLeft: "1.8rem", paddingRight: "0.75rem" }}
-                              className="w-full input-field font-mono font-bold text-slate-900 text-right bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm placeholder-slate-300"
+                              style={{ paddingLeft: "1.6rem", paddingRight: "0.5rem" }}
+                              className="w-full py-2 text-sm font-mono font-bold text-slate-900 text-right bg-slate-50/70 hover:bg-slate-50 focus:bg-white border border-slate-300 rounded-lg outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 placeholder-slate-300 transition-all"
                               placeholder="0.00"
                               value={item.price}
                               onChange={(e) => handleRepairItemChange(index, "price", e.target.value)}
@@ -4682,7 +4731,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => handleRemoveRepairItem(index)}
-                            className="w-8 h-8 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                            className="w-8 h-8 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-colors flex items-center justify-center cursor-pointer mx-auto"
                             title="ลบแถวนี้"
                           >
                             <Trash2 size={16} />
@@ -5073,19 +5122,27 @@ export default function App() {
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase border-b border-slate-200">
                             <tr>
-                              <th className="py-2.5 px-4 w-12 text-center">#</th>
+                              <th className="py-2.5 px-3 w-10 text-center">#</th>
                               <th className="py-2.5 px-4">รายการซ่อม / อะไหล่</th>
+                              <th className="py-2.5 px-3 text-center w-24">จำนวน</th>
+                              <th className="py-2.5 px-3 text-center w-24">หน่วย</th>
                               <th className="py-2.5 px-4 text-right w-36">ราคา (บาท)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {viewingLog.repairItemList.map((it: any, idx: number) => (
                               <tr key={idx} className="hover:bg-slate-50/50">
-                                <td className="py-2.5 px-4 text-center font-mono text-xs text-slate-400">
+                                <td className="py-2.5 px-3 text-center font-mono text-xs text-slate-400">
                                   {idx + 1}
                                 </td>
                                 <td className="py-2.5 px-4 font-medium text-slate-800">
                                   {it.name || "-"}
+                                </td>
+                                <td className="py-2.5 px-3 text-center font-mono text-slate-600 text-xs">
+                                  {it.quantity ? (isNaN(Number(it.quantity)) ? it.quantity : Number(it.quantity).toLocaleString()) : "-"}
+                                </td>
+                                <td className="py-2.5 px-3 text-center text-slate-600 text-xs">
+                                  {it.unit || "-"}
                                 </td>
                                 <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
                                   {it.price ? `฿${Number(it.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}
@@ -5095,7 +5152,7 @@ export default function App() {
                           </tbody>
                           <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold">
                             <tr>
-                              <td colSpan={2} className="py-3 px-4 text-right text-slate-600 text-xs uppercase tracking-wider">
+                              <td colSpan={4} className="py-3 px-4 text-right text-slate-600 text-xs uppercase tracking-wider">
                                 ค่าใช้จ่ายรวม:
                               </td>
                               <td className="py-3 px-4 text-right text-base font-mono font-black text-blue-600">
