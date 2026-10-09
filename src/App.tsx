@@ -90,6 +90,11 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const appId = "cmg-equipment-supervisor";
 
+const isPdfUrl = (url?: string): boolean => {
+  if (!url) return false;
+  return /\.pdf($|\?)/i.test(url) || url.toLowerCase().includes(".pdf");
+};
+
 const uploadImageToStorage = (
   file: File,
   folder: string,
@@ -3549,24 +3554,50 @@ export default function App() {
                                   )}
                                 </td>
                                 <td className="p-3 text-slate-600">
-                                  <div>{h.repairItems || "-"}</div>
+                                  {h.repairItemList && h.repairItemList.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {h.repairItemList.map((it: any, i: number) => (
+                                        <div key={i} className="text-xs flex items-center justify-between gap-2">
+                                          <span className="text-slate-700 font-medium">• {it.name}</span>
+                                          {it.price && (
+                                            <span className="font-mono text-emerald-600 font-semibold shrink-0">
+                                              ฿{Number(it.price).toLocaleString()}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div>{h.repairItems || "-"}</div>
+                                  )}
                                   {h.photos && h.photos.length > 0 && (
                                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                      {h.photos.map((url: string, pIdx: number) => (
-                                        <button
-                                          key={pIdx}
-                                          type="button"
-                                          onClick={() => window.open(url, "_blank")}
-                                          className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all shrink-0 bg-slate-100"
-                                          title="คลิกเพื่อดูรูปภาพ"
-                                        >
-                                          <img
-                                            src={url}
-                                            alt="รูปอะไหล่"
-                                            className="w-full h-full object-cover"
-                                          />
-                                        </button>
-                                      ))}
+                                      {h.photos.map((url: string, pIdx: number) => {
+                                        const isPdf = isPdfUrl(url);
+                                        return (
+                                          <button
+                                            key={pIdx}
+                                            type="button"
+                                            onClick={() => window.open(url, "_blank")}
+                                            className={`w-7 h-7 rounded-md overflow-hidden border cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all shrink-0 flex items-center justify-center ${
+                                              isPdf
+                                                ? "bg-rose-50 border-rose-200 text-rose-600 font-bold text-[8px]"
+                                                : "border-slate-200 bg-slate-100"
+                                            }`}
+                                            title={isPdf ? "คลิกเพื่อเปิดดูไฟล์ PDF" : "คลิกเพื่อดูรูปภาพ"}
+                                          >
+                                            {isPdf ? (
+                                              <FileText size={13} className="text-rose-600" />
+                                            ) : (
+                                              <img
+                                                src={url}
+                                                alt="รูปอะไหล่"
+                                                className="w-full h-full object-cover"
+                                              />
+                                            )}
+                                          </button>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </td>
@@ -3611,6 +3642,7 @@ export default function App() {
   const MaintenanceView = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingLog, setEditingLog] = useState<any>(null);
+    const [viewingLog, setViewingLog] = useState<any>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [vehicleFilter, setVehicleFilter] = useState("all");
@@ -3626,6 +3658,7 @@ export default function App() {
       issue: string;
       cause: string;
       repairItems: string;
+      repairItemList: Array<{ name: string; price: string }>;
       cost: string;
       status: string;
       finishDate: string;
@@ -3636,6 +3669,7 @@ export default function App() {
       issue: "",
       cause: "",
       repairItems: "",
+      repairItemList: [{ name: "", price: "" }],
       cost: "",
       status: "InProgress",
       finishDate: "",
@@ -3666,6 +3700,53 @@ export default function App() {
       setLightboxIndex(i);
       setLightboxUrl(lightboxList[i]);
     };
+
+    const handleAddRepairItem = () => {
+      setMaintenanceForm((prev) => ({
+        ...prev,
+        repairItemList: [...(prev.repairItemList || []), { name: "", price: "" }],
+      }));
+    };
+
+    const handleRemoveRepairItem = (index: number) => {
+      setMaintenanceForm((prev) => {
+        const nextList = (prev.repairItemList || []).filter((_, i) => i !== index);
+        const sum = nextList.reduce((acc, it) => acc + (parseFloat(it.price) || 0), 0);
+        return {
+          ...prev,
+          repairItemList: nextList,
+          cost: sum > 0 ? String(sum) : (nextList.length === 0 ? prev.cost : ""),
+        };
+      });
+    };
+
+    const handleRepairItemChange = (index: number, field: "name" | "price", value: string) => {
+      setMaintenanceForm((prev) => {
+        const nextList = [...(prev.repairItemList || [])];
+        nextList[index] = { ...nextList[index], [field]: value };
+
+        let nextCost = prev.cost;
+        if (field === "price") {
+          const sum = nextList.reduce((acc, it) => acc + (parseFloat(it.price) || 0), 0);
+          if (sum > 0 || nextList.some((it) => (it.price || "").trim() !== "")) {
+            nextCost = sum > 0 ? String(sum) : "";
+          }
+        }
+
+        return {
+          ...prev,
+          repairItemList: nextList,
+          cost: nextCost,
+        };
+      });
+    };
+
+    const repairItemsTotal = useMemo(() => {
+      return (maintenanceForm.repairItemList || []).reduce(
+        (acc, it) => acc + (parseFloat(it.price) || 0),
+        0
+      );
+    }, [maintenanceForm.repairItemList]);
 
     const selectedVehicle = useMemo(
       () => vehicles.find((v) => v.id === maintenanceForm.vehicleId),
@@ -3749,12 +3830,31 @@ export default function App() {
           : log.photo
           ? [log.photo]
           : [];
+        let initialRepairList: Array<{ name: string; price: string }> = [];
+        if (Array.isArray(log.repairItemList) && log.repairItemList.length > 0) {
+          initialRepairList = log.repairItemList.map((it: any) => ({
+            name: it.name || "",
+            price: it.price != null ? String(it.price) : "",
+          }));
+        } else if (log.repairItems && typeof log.repairItems === "string" && log.repairItems.trim()) {
+          const parts = log.repairItems.split(/,\s*/).filter(Boolean);
+          if (parts.length > 0) {
+            initialRepairList = parts.map((part: string) => ({
+              name: part.replace(/\s*\([\d,.]+\s*บ\.\)$/, "").trim(),
+              price: "",
+            }));
+          }
+        }
+        if (initialRepairList.length === 0) {
+          initialRepairList = [{ name: "", price: "" }];
+        }
         setMaintenanceForm({ 
           vehicleId: vId,
           date: log.date || new Date().toISOString().split("T")[0],
           issue: log.issue || "",
           cause: log.cause || "",
           repairItems: log.repairItems || "",
+          repairItemList: initialRepairList,
           cost: log.cost != null ? String(log.cost) : "",
           status: log.status === "Completed" ? "Completed" : "InProgress",
           finishDate: log.finishDate || "",
@@ -3769,6 +3869,7 @@ export default function App() {
           issue: "",
           cause: "",
           repairItems: "",
+          repairItemList: [{ name: "", price: "" }],
           cost: "",
           status: "InProgress",
           finishDate: "",
@@ -3803,8 +3904,8 @@ export default function App() {
           photos: [...(prev.photos || []), ...urls],
         }));
       } catch (err: any) {
-        console.error("Maintenance photo upload error:", err);
-        alert("อัพโหลดรูปภาพไม่สำเร็จ: " + (err?.message || "กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือสิทธิ์"));
+        console.error("Maintenance file upload error:", err);
+        alert("อัพโหลดไฟล์ไม่สำเร็จ: " + (err?.message || "กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือสิทธิ์"));
       } finally {
         setIsUploadingPhoto(false);
         setUploadingCount(0);
@@ -3834,8 +3935,19 @@ export default function App() {
         }
       }
       if (!finalVehicleId) return alert("กรุณาเลือกทะเบียนรถ");
+
+      const cleanRepairList = (maintenanceForm.repairItemList || []).filter(
+        (it) => it.name.trim() !== "" || (it.price || "").trim() !== ""
+      );
+      const repairItemsSummary = cleanRepairList
+        .filter((it) => it.name.trim())
+        .map((it) => (it.price ? `${it.name.trim()} (${Number(it.price).toLocaleString()} บ.)` : it.name.trim()))
+        .join(", ");
+
       const payload = {
         ...maintenanceForm,
+        repairItemList: cleanRepairList,
+        repairItems: repairItemsSummary || maintenanceForm.repairItems || "",
         vehicleId: finalVehicleId,
         cost: parseFloat(maintenanceForm.cost) || 0,
       };
@@ -4090,7 +4202,9 @@ export default function App() {
                 {filteredLogs.map((m) => (
                   <tr
                     key={m.id}
-                    className="hover:bg-slate-50/70 transition-colors"
+                    onClick={() => setViewingLog(m)}
+                    className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
+                    title="คลิกเพื่อดูรายละเอียดและรูปภาพทั้งหมด"
                   >
                     <td className="p-4 align-top whitespace-nowrap">
                       <div className="flex items-center gap-1.5 text-xs font-mono text-slate-500">
@@ -4099,13 +4213,13 @@ export default function App() {
                       </div>
                     </td>
                     <td className="p-4 align-top">
-                      <div className="inline-flex items-center gap-2 bg-slate-100/90 text-slate-700 border border-slate-200/80 px-2.5 py-1 rounded-lg font-semibold text-xs">
+                      <div className="inline-flex items-center gap-2 bg-slate-100/90 text-slate-700 border border-slate-200/80 px-2.5 py-1 rounded-lg font-semibold text-xs group-hover:border-blue-300 transition-colors">
                         <Truck size={14} className="text-blue-600 shrink-0" />
                         <span>{getVehicleName(m.vehicleId)}</span>
                       </div>
                     </td>
                     <td className="p-4 align-top">
-                      <div className="font-semibold text-slate-800 text-sm">
+                      <div className="font-semibold text-slate-800 text-sm group-hover:text-blue-700 transition-colors">
                         {m.issue || "-"}
                       </div>
                       {m.cause && (
@@ -4114,29 +4228,66 @@ export default function App() {
                           <span>{m.cause}</span>
                         </div>
                       )}
-                      {m.repairItems && (
+                      {m.repairItemList && m.repairItemList.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5 mt-1.5">
+                          {m.repairItemList.map((it: any, i: number) => (
+                            <span
+                              key={i}
+                              className="text-xs text-amber-900 bg-amber-50/90 border border-amber-200/80 px-2 py-0.5 rounded-md inline-flex items-center gap-1.5 font-medium"
+                            >
+                              <span>🛠️ {it.name}</span>
+                              {it.price && (
+                                <span className="text-emerald-700 font-bold font-mono text-[11px] bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60">
+                                  ฿{Number(it.price).toLocaleString()}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      ) : m.repairItems ? (
                         <div className="text-xs text-amber-800 bg-amber-50/90 border border-amber-200/70 px-2.5 py-0.5 rounded-md mt-1.5 inline-flex items-center gap-1 font-medium">
                           <span>🛠️</span>
                           <span>{m.repairItems}</span>
                         </div>
-                      )}
+                      ) : null}
                       {m.photos && m.photos.length > 0 && (
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                          {m.photos.map((url: string, pIdx: number) => (
-                            <button
-                              key={pIdx}
-                              type="button"
-                              onClick={() => openLightbox(m.photos, pIdx)}
-                              className="group relative w-8 h-8 rounded-lg overflow-hidden border border-slate-200/90 shadow-xs hover:ring-2 hover:ring-blue-500 transition-all shrink-0 bg-slate-100"
-                              title="คลิกเพื่อดูรูปภาพขนาดเต็ม"
-                            >
-                              <img
-                                src={url}
-                                alt={`รูปอะไหล่ที่ ${pIdx + 1}`}
-                                className="w-full h-full object-cover group-hover:scale-110 transition-transform"
-                              />
-                            </button>
-                          ))}
+                        <div className="flex items-center gap-1.5 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                          {m.photos.map((url: string, pIdx: number) => {
+                            const isPdf = isPdfUrl(url);
+                            return (
+                              <button
+                                key={pIdx}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isPdf) {
+                                    window.open(url, "_blank");
+                                  } else {
+                                    openLightbox(m.photos, pIdx);
+                                  }
+                                }}
+                                className={`group/photo relative w-8 h-8 rounded-lg overflow-hidden border shadow-xs hover:ring-2 hover:ring-blue-500 transition-all shrink-0 flex items-center justify-center cursor-pointer ${
+                                  isPdf
+                                    ? "bg-rose-50 border-rose-200 text-rose-600 font-bold"
+                                    : "border-slate-200/90 bg-slate-100"
+                                }`}
+                                title={isPdf ? "คลิกเพื่อเปิดดูไฟล์ PDF" : "คลิกเพื่อดูรูปภาพขนาดเต็ม"}
+                              >
+                                {isPdf ? (
+                                  <div className="flex flex-col items-center justify-center text-[7px] font-bold leading-none">
+                                    <FileText size={13} className="text-rose-600" />
+                                    <span className="mt-0.5 text-rose-700">PDF</span>
+                                  </div>
+                                ) : (
+                                  <img
+                                    src={url}
+                                    alt={`รูปอะไหล่ที่ ${pIdx + 1}`}
+                                    className="w-full h-full object-cover group-hover/photo:scale-110 transition-transform"
+                                  />
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </td>
@@ -4158,17 +4309,23 @@ export default function App() {
                       </div>
                     </td>
                     <td className="p-4 align-top text-center whitespace-nowrap">
-                      <div className="flex justify-center items-center gap-1.5">
+                      <div className="flex justify-center items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => openModal(m)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 transition-all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openModal(m);
+                          }}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 transition-all cursor-pointer"
                           title="แก้ไข"
                         >
                           <Pencil size={15} />
                         </button>
                         <button
-                          onClick={() => handleDelete(m.id)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(m.id);
+                          }}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all cursor-pointer"
                           title="ลบ"
                         >
                           <Trash2 size={15} />
@@ -4203,13 +4360,16 @@ export default function App() {
         {/* Modal */}
         {isModalOpen &&
           createPortal(
-            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 z-[9999] animate-fade-in backdrop-blur-md overflow-y-auto">
-              <div className="bg-white border border-slate-200/90 text-slate-800 rounded-3xl w-full max-w-2xl max-h-[92vh] my-auto shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] flex flex-col overflow-hidden transition-all">
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 md:p-8 pt-8 sm:pt-12 pb-8 sm:pb-12 z-[9999] animate-fade-in backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200/90 text-slate-800 rounded-3xl w-full max-w-4xl max-h-[88vh] my-auto shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] flex flex-col overflow-hidden transition-all">
                 {/* Gradient Accent Bar */}
                 <div className="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-500 shrink-0" />
 
                 {/* Header */}
-                <div className="px-6 py-4.5 border-b border-slate-100 flex justify-between items-center bg-white/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
+                <div
+                  style={{ paddingTop: "1.5rem", paddingBottom: "1.25rem" }}
+                  className="px-6 sm:px-8 border-b border-slate-100 flex justify-between items-center bg-white/95 backdrop-blur-md sticky top-0 z-20 shrink-0"
+                >
                   <div className="flex items-center gap-3.5">
                     <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
                       <Wrench size={20} className="stroke-[2.2]" />
@@ -4246,18 +4406,18 @@ export default function App() {
 
                 {/* Modal Body */}
                 <div className="p-6 space-y-5 flex-1 overflow-y-auto">
-                  {/* Section 1: Vehicle & Date */}
-                  <div className="bg-gradient-to-br from-slate-50/90 via-slate-50 to-slate-100/60 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
+                  {/* Section 1: ข้อมูลยานพาหนะและอาการ */}
+                  <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Searchable Vehicle Combobox */}
                       <div className="relative z-20" ref={vehicleComboboxRef}>
                         <div className="flex items-center justify-between mb-1.5">
-                          <label className="label mb-0 flex items-center gap-1.5 font-bold text-slate-800 text-xs">
+                          <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                             <span>🆔 ทะเบียนรถ</span>
                             <span className="text-rose-500">*</span>
                           </label>
                           {selectedVehicle && (
-                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80 flex items-center gap-1">
+                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
                               <Check size={11} className="stroke-[3]" />
                               <span>เลือกแล้ว</span>
                             </span>
@@ -4289,13 +4449,8 @@ export default function App() {
                                 setIsVehicleDropdownOpen(false);
                               }
                             }}
-                            className={`w-full pl-9 pr-16 py-2.5 bg-white border rounded-xl text-sm font-medium text-slate-800 placeholder-slate-400 outline-none transition-all ${
-                              isVehicleDropdownOpen
-                                ? "border-blue-500 ring-2 ring-blue-100 shadow-sm"
-                                : maintenanceForm.vehicleId
-                                ? "border-slate-300 hover:border-slate-400 bg-white"
-                                : "border-slate-300 hover:border-slate-400"
-                            }`}
+                            style={{ paddingLeft: "2.6rem", paddingRight: "4.2rem" }}
+                            className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white"
                           />
 
                           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
@@ -4303,7 +4458,7 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={handleClearVehicle}
-                                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
                                 title="ล้างการเลือก"
                               >
                                 <X size={15} />
@@ -4312,7 +4467,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
-                              className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
                               title="เปิด/ปิด รายการทะเบียน"
                             >
                               <ChevronDown
@@ -4327,7 +4482,7 @@ export default function App() {
 
                         {/* Searchable Dropdown Popup */}
                         {isVehicleDropdownOpen && (
-                          <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-60">
+                          <div className="absolute top-full left-0 right-0 mt-1.5 z-50 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-60">
                             <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-semibold shrink-0">
                               <span>
                                 {filteredVehiclesForModal.length > 0
@@ -4409,12 +4564,12 @@ export default function App() {
 
                       {/* Date */}
                       <div>
-                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                        <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                           <span>📅 วันที่แจ้งซ่อม</span>
                         </label>
                         <input
                           type="date"
-                          className="input-field bg-white"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white"
                           value={maintenanceForm.date}
                           onChange={(e) =>
                             setMaintenanceForm({
@@ -4425,111 +4580,202 @@ export default function App() {
                         />
                       </div>
                     </div>
-                  </div>
 
-                  {/* Section 2: Symptoms & Location */}
-                  <div className="space-y-4">
-                    <div>
-                      <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                        <span>⚠️ อาการเสีย</span>
-                      </label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="เช่น บูมสั่นเวลาทำงาน, แอร์ไม่เย็น, เครื่องยนต์ดับกะทันหัน..."
-                        value={maintenanceForm.issue}
-                        onChange={(e) =>
-                          setMaintenanceForm({
-                            ...maintenanceForm,
-                            issue: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                        <span>📍 สถานที่ซ่อม</span>
-                      </label>
-                      <textarea
-                        className="input-field h-20 resize-y"
-                        placeholder="ระบุสถานที่ซ่อม เช่น ศูนย์บริการ, ไซต์งาน, อู่ซ่อม..."
-                        value={maintenanceForm.cause}
-                        onChange={(e) =>
-                          setMaintenanceForm({
-                            ...maintenanceForm,
-                            cause: e.target.value,
-                          })
-                        }
-                      ></textarea>
-                    </div>
-                  </div>
-
-                  {/* Section 3: รายการซ่อม/อะไหล่ + แนบรูปภาพ */}
-                  <div className="bg-gradient-to-br from-blue-50/40 via-white to-slate-50/60 p-4.5 rounded-2xl border border-blue-100/90 shadow-xs space-y-3.5">
-                    <div className="flex items-center justify-between">
-                      <label className="label mb-0 flex items-center gap-1.5 text-slate-800 font-bold text-xs">
-                        <span>🛠️ รายการซ่อม / อะไหล่ที่เปลี่ยน</span>
-                      </label>
-                      <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
-                        ระบุรายละเอียดและแนบรูปภาพประกอบ
-                      </span>
-                    </div>
-
-                    <textarea
-                      className="input-field min-h-[76px] resize-y bg-white text-sm"
-                      placeholder="ระบุรายการซ่อมและอะไหล่ที่เปลี่ยน เช่น เปลี่ยนถ่ายน้ำมันเครื่อง, เปลี่ยนสายพาน..."
-                      value={maintenanceForm.repairItems}
-                      onChange={(e) =>
-                        setMaintenanceForm({
-                          ...maintenanceForm,
-                          repairItems: e.target.value,
-                        })
-                      }
-                    />
-
-                    {/* Photo Attachment Container */}
-                    <div className="pt-2.5 border-t border-slate-200/70 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                          <Camera size={14} className="text-blue-600" />
-                          <span>แนบรูปภาพอะไหล่ / จุดซ่อม / ใบเสร็จ</span>
-                          {maintenanceForm.photos && maintenanceForm.photos.length > 0 && (
-                            <span className="ml-1 text-[11px] font-semibold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full">
-                              {maintenanceForm.photos.length} รูป
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-slate-400">
-                          (สูงสุด 10MB ต่อรูป)
-                        </span>
+                    {/* Symptoms & Location (2 Columns) */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                          <span>⚠️ อาการเสีย</span>
+                        </label>
+                        <input
+                          type="text"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white"
+                          placeholder="เช่น บูมสั่นเวลาทำงาน, แอร์ไม่เย็น, เครื่องยนต์ดับ..."
+                          value={maintenanceForm.issue}
+                          onChange={(e) =>
+                            setMaintenanceForm({
+                              ...maintenanceForm,
+                              issue: e.target.value,
+                            })
+                          }
+                        />
                       </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                          <span>📍 สถานที่ซ่อม</span>
+                        </label>
+                        <input
+                          type="text"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white"
+                          placeholder="เช่น ศูนย์บริการ, ไซต์งาน A, อู่ซ่อม..."
+                          value={maintenanceForm.cause}
+                          onChange={(e) =>
+                            setMaintenanceForm({
+                              ...maintenanceForm,
+                              cause: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                      {/* Photo Grid & Upload Tile */}
-                      <div className="flex flex-wrap gap-2.5 items-center">
-                        {/* Thumbnails */}
-                        {maintenanceForm.photos?.map((url, idx) => (
+                  {/* Section 2: รายการซ่อม / อะไหล่ที่เปลี่ยน */}
+                  <div className="pt-5 border-t border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">
+                          🛠️ รายการซ่อม / อะไหล่ที่เปลี่ยน
+                        </span>
+                        {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim()).length > 0 && (
+                          <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                            {maintenanceForm.repairItemList.filter((it) => it.name.trim() || it.price.trim()).length} รายการ
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Table Header Labels */}
+                    <div className="hidden sm:flex items-center gap-2 px-1 text-[11px] font-bold text-slate-400 select-none">
+                      <span className="w-6 text-center">#</span>
+                      <span className="flex-1">รายการซ่อม / อะไหล่</span>
+                      <span className="w-36 text-right pr-2">ราคา (บาท)</span>
+                      <span className="w-8 text-center">ลบ</span>
+                    </div>
+
+                    {/* Flat Rows: Clean & Border-Clutter Free */}
+                    <div className="space-y-2">
+                      {maintenanceForm.repairItemList.map((item, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          {/* Index */}
+                          <span className="w-6 text-center font-mono font-bold text-xs text-slate-400 select-none shrink-0">
+                            {index + 1}
+                          </span>
+
+                          {/* Item Name */}
+                          <input
+                            type="text"
+                            className="flex-1 input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                            placeholder={`ระบุรายการที่ ${index + 1} เช่น เปลี่ยนน้ำมันเครื่อง, กรองโซล่า...`}
+                            value={item.name}
+                            onChange={(e) => handleRepairItemChange(index, "name", e.target.value)}
+                          />
+
+                          {/* Price with single clean input */}
+                          <div className="relative w-36 shrink-0">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs pointer-events-none select-none">
+                              ฿
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              style={{ paddingLeft: "1.8rem", paddingRight: "0.75rem" }}
+                              className="w-full input-field font-mono font-bold text-slate-900 text-right bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm placeholder-slate-300"
+                              placeholder="0.00"
+                              value={item.price}
+                              onChange={(e) => handleRepairItemChange(index, "price", e.target.value)}
+                            />
+                          </div>
+
+                          {/* Remove Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRepairItem(index)}
+                            className="w-8 h-8 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                            title="ลบแถวนี้"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Bottom Actions & Subtotal */}
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={handleAddRepairItem}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 py-1 px-1 hover:underline cursor-pointer"
+                      >
+                        <Plus size={14} className="stroke-[3]" />
+                        <span>เพิ่มรายการถัดไป</span>
+                      </button>
+
+                      {repairItemsTotal > 0 && (
+                        <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                          <span>รวมค่ารายการ:</span>
+                          <span className="text-sm font-bold font-mono text-slate-900 bg-slate-100 px-2.5 py-0.5 rounded-lg">
+                            ฿{repairItemsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Section 3: รูปภาพ / เอกสารประกอบ */}
+                  <div className="pt-5 border-t border-slate-100 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <Camera size={14} className="text-slate-500" />
+                        <span>รูปภาพ / เอกสาร / ใบเสร็จ (รองรับ PDF)</span>
+                        {maintenanceForm.photos && maintenanceForm.photos.length > 0 && (
+                          <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                            {maintenanceForm.photos.length} ไฟล์
+                          </span>
+                        )}
+                      </label>
+                      <span className="text-[11px] text-slate-400">รูปภาพ หรือ PDF (สูงสุด 10MB)</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2.5 items-center">
+                      {maintenanceForm.photos?.map((url, idx) => {
+                        const isPdf = isPdfUrl(url);
+                        return (
                           <div
                             key={idx}
-                            className="group relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-xs shrink-0 cursor-pointer transition-transform hover:scale-105"
+                            className={`group relative w-16 h-16 rounded-xl overflow-hidden border shadow-2xs shrink-0 cursor-pointer transition-transform hover:scale-105 flex flex-col items-center justify-center ${
+                              isPdf
+                                ? "bg-rose-50/80 border-rose-200 text-rose-700 hover:bg-rose-100/70"
+                                : "border-slate-200 bg-slate-100"
+                            }`}
+                            onClick={() => {
+                              if (isPdf) {
+                                window.open(url, "_blank");
+                              } else {
+                                openLightbox(maintenanceForm.photos, idx);
+                              }
+                            }}
+                            title={isPdf ? "คลิกเพื่อเปิดดูไฟล์ PDF" : "คลิกเพื่อดูรูปเต็ม"}
                           >
-                            <img
-                              src={url}
-                              alt={`รูปอะไหล่ที่ ${idx + 1}`}
-                              className="w-full h-full object-cover"
-                              onClick={() => openLightbox(maintenanceForm.photos, idx)}
-                            />
-                            {/* Hover Overlay */}
-                            <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                            {isPdf ? (
+                              <div className="flex flex-col items-center justify-center p-1 text-center select-none">
+                                <FileText size={20} className="text-rose-600" />
+                                <span className="text-[10px] font-bold font-mono text-rose-700 mt-0.5">PDF</span>
+                              </div>
+                            ) : (
+                              <img
+                                src={url}
+                                alt={`รูปอะไหล่ที่ ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+
+                            <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openLightbox(maintenanceForm.photos, idx);
+                                  if (isPdf) {
+                                    window.open(url, "_blank");
+                                  } else {
+                                    openLightbox(maintenanceForm.photos, idx);
+                                  }
                                 }}
-                                className="w-6 h-6 rounded-md bg-white/90 text-slate-800 flex items-center justify-center hover:bg-white shadow-xs transition-colors"
-                                title="ดูรูปเต็ม"
+                                className="w-5 h-5 rounded bg-white text-slate-800 flex items-center justify-center hover:bg-slate-100 shadow-xs cursor-pointer"
+                                title={isPdf ? "เปิดไฟล์ PDF" : "ดูรูปเต็ม"}
                               >
-                                <Search size={12} />
+                                {isPdf ? <FileText size={10} className="text-rose-600" /> : <Search size={10} />}
                               </button>
                               <button
                                 type="button"
@@ -4537,72 +4783,77 @@ export default function App() {
                                   e.stopPropagation();
                                   handleRemovePhoto(idx);
                                 }}
-                                className="w-6 h-6 rounded-md bg-rose-600 text-white flex items-center justify-center hover:bg-rose-700 shadow-xs transition-colors"
-                                title="ลบรูป"
+                                className="w-5 h-5 rounded bg-rose-600 text-white flex items-center justify-center hover:bg-rose-700 shadow-xs cursor-pointer"
+                                title="ลบไฟล์"
                               >
-                                <Trash2 size={12} />
+                                <Trash2 size={10} />
                               </button>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
 
-                        {/* Upload Button Tile */}
-                        <label
-                          className={`w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer shrink-0 transition-all ${
-                            isUploadingPhoto
-                              ? "border-blue-300 bg-blue-50/70 cursor-wait"
-                              : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/50 bg-white"
-                          }`}
-                        >
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            className="hidden"
-                            onChange={handleMaintenancePhotoUpload}
-                            disabled={isUploadingPhoto}
-                          />
-                          {isUploadingPhoto ? (
-                            <div className="flex flex-col items-center gap-1">
-                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                              <span className="text-[10px] font-bold text-blue-600">
-                                {uploadProgress}%
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-600 transition-colors">
-                              <div className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                                <Plus size={14} className="stroke-[3]" />
-                              </div>
-                              <span className="text-[10px] font-semibold">แนบรูปภาพ</span>
-                            </div>
-                          )}
-                        </label>
-                      </div>
-
-                      {isUploadingPhoto && uploadingCount > 1 && (
-                        <p className="text-xs text-blue-600 font-medium">
-                          กำลังอัพโหลด {uploadingCount} รูป... ({uploadProgress}%)
-                        </p>
-                      )}
+                      {/* Upload Tile */}
+                      <label
+                        className={`w-16 h-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer shrink-0 transition-all ${
+                          isUploadingPhoto
+                            ? "border-blue-300 bg-blue-50/70 cursor-wait"
+                            : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/40 bg-slate-50/50"
+                        }`}
+                        title="คลิกเพื่อแนบรูปภาพหรือไฟล์ PDF"
+                      >
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf,.pdf"
+                          multiple
+                          className="hidden"
+                          onChange={handleMaintenancePhotoUpload}
+                          disabled={isUploadingPhoto}
+                        />
+                        {isUploadingPhoto ? (
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-[9px] font-bold text-blue-600">{uploadProgress}%</span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-blue-600">
+                            <Plus size={14} className="stroke-[3]" />
+                            <span className="text-[9px] font-bold">แนบไฟล์</span>
+                          </div>
+                        )}
+                      </label>
                     </div>
+
+                    {isUploadingPhoto && uploadingCount > 1 && (
+                      <p className="text-[11px] text-blue-600 font-medium">กำลังอัพโหลด {uploadingCount} ไฟล์... ({uploadProgress}%)</p>
+                    )}
                   </div>
 
-                  {/* Section 4: Cost & Status */}
-                  <div className="bg-gradient-to-br from-slate-50/90 via-slate-50 to-slate-100/60 p-4.5 rounded-2xl border border-slate-200/80 shadow-xs">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Section 4: สรุปค่าใช้จ่ายและสถานะ */}
+                  <div className="pt-5 border-t border-slate-100">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       {/* Cost */}
                       <div>
-                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                          <span>💰 ค่าใช้จ่าย (บาท)</span>
-                        </label>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-bold text-slate-700">
+                            💰 ค่าใช้จ่ายรวม (บาท)
+                          </label>
+                          {repairItemsTotal > 0 && (
+                            <span className="text-[10px] text-emerald-600 font-bold">
+                              ✓ รวมจากรายการซ่อม
+                            </span>
+                          )}
+                        </div>
                         <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none select-none">
                             ฿
                           </span>
                           <input
                             type="number"
-                            className="input-field pl-8 font-mono font-bold text-slate-800 bg-white"
+                            min="0"
+                            step="any"
+                            style={{ paddingLeft: "2.3rem" }}
+                            className="w-full input-field font-mono font-bold text-slate-900 bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-base placeholder-slate-300"
                             placeholder="0.00"
                             value={maintenanceForm.cost}
                             onChange={(e) =>
@@ -4617,11 +4868,11 @@ export default function App() {
 
                       {/* Status */}
                       <div>
-                        <label className="label mb-1.5 font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                          <span>📊 สถานะ</span>
+                        <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                          📊 สถานะ
                         </label>
                         <select
-                          className="input-field font-semibold text-slate-800 bg-white"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-xs font-semibold text-slate-800"
                           value={maintenanceForm.status}
                           onChange={(e) => {
                             const newStatus = e.target.value;
@@ -4642,35 +4893,31 @@ export default function App() {
                           ))}
                         </select>
                       </div>
-                    </div>
 
-                    {/* Finish Date */}
-                    <div className="mt-4 pt-3 border-t border-slate-200/70">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="label mb-0 font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      {/* Finish Date */}
+                      <div>
+                        <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                           <span>✅ วันที่ซ่อมเสร็จ</span>
                           {maintenanceForm.status === "Completed" && (
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80">
-                              งานเสร็จสมบูรณ์
-                            </span>
+                            <span className="text-[10px] font-bold text-emerald-600">เสร็จสมบูรณ์</span>
                           )}
                         </label>
+                        <input
+                          type="date"
+                          className={`input-field text-xs transition-all ${
+                            maintenanceForm.status === "Completed"
+                              ? "bg-emerald-50/30 border-emerald-300"
+                              : "bg-slate-50/70 hover:bg-slate-50 focus:bg-white"
+                          }`}
+                          value={maintenanceForm.finishDate}
+                          onChange={(e) =>
+                            setMaintenanceForm({
+                              ...maintenanceForm,
+                              finishDate: e.target.value,
+                            })
+                          }
+                        />
                       </div>
-                      <input
-                        type="date"
-                        className={`input-field bg-white transition-all ${
-                          maintenanceForm.status === "Completed"
-                            ? "border-emerald-400 ring-2 ring-emerald-50 bg-emerald-50/20"
-                            : ""
-                        }`}
-                        value={maintenanceForm.finishDate}
-                        onChange={(e) =>
-                          setMaintenanceForm({
-                            ...maintenanceForm,
-                            finishDate: e.target.value,
-                          })
-                        }
-                      />
                     </div>
                   </div>
                 </div>
@@ -4708,6 +4955,246 @@ export default function App() {
                       )}
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* Maintenance Detail View Modal */}
+        {viewingLog &&
+          createPortal(
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 md:p-8 pt-8 sm:pt-12 pb-8 sm:pb-12 z-[9999] animate-fade-in backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200/90 text-slate-800 rounded-3xl w-full max-w-3xl max-h-[88vh] my-auto shadow-2xl flex flex-col overflow-hidden transition-all">
+                {/* Accent Top Bar */}
+                <div className="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-500 shrink-0" />
+
+                {/* Header */}
+                <div
+                  style={{ paddingTop: "1.25rem", paddingBottom: "1.25rem" }}
+                  className="px-6 sm:px-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20 shrink-0"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0">
+                      <Wrench size={22} className="stroke-[2.2]" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                          รายละเอียดการแจ้งซ่อมบำรุง
+                        </h3>
+                        <MaintenanceStatusBadge status={viewingLog.status} />
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        {getVehicleName(viewingLog.vehicleId)} • วันที่ {viewingLog.date}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setViewingLog(null)}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                    title="ปิดหน้าต่าง"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="p-6 sm:p-8 space-y-6 flex-1 overflow-y-auto">
+                  {/* Overview Cards: Vehicle, Date, Finish Date, Location */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                    <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        🚗 ทะเบียนรถ
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 block mt-1 truncate" title={getVehicleName(viewingLog.vehicleId)}>
+                        {getVehicleName(viewingLog.vehicleId)}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        📅 วันที่แจ้งซ่อม
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 font-mono block mt-1">
+                        {viewingLog.date || "-"}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        ✅ วันที่ซ่อมเสร็จ
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 font-mono block mt-1">
+                        {viewingLog.finishDate ? (
+                          <span className="text-emerald-700 font-bold">{viewingLog.finishDate}</span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">ยังไม่เสร็จ</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-3.5">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                        📍 สถานที่ซ่อม
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 block mt-1 truncate" title={viewingLog.cause || "-"}>
+                        {viewingLog.cause || "-"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Issue / Symptoms */}
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>⚠️</span> อาการเสีย / ปัญหาที่แจ้ง
+                    </span>
+                    <div className="p-4 bg-amber-50/40 border border-amber-200/70 rounded-2xl text-slate-800 font-medium text-sm leading-relaxed">
+                      {viewingLog.issue || "ไม่ได้ระบุอาการเสีย"}
+                    </div>
+                  </div>
+
+                  {/* Repair Items */}
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>🛠️</span> รายการซ่อม / อะไหล่ที่เปลี่ยน
+                      </span>
+                      {viewingLog.repairItemList && viewingLog.repairItemList.length > 0 && (
+                        <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full">
+                          {viewingLog.repairItemList.length} รายการ
+                        </span>
+                      )}
+                    </div>
+
+                    {viewingLog.repairItemList && viewingLog.repairItemList.length > 0 ? (
+                      <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase border-b border-slate-200">
+                            <tr>
+                              <th className="py-2.5 px-4 w-12 text-center">#</th>
+                              <th className="py-2.5 px-4">รายการซ่อม / อะไหล่</th>
+                              <th className="py-2.5 px-4 text-right w-36">ราคา (บาท)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {viewingLog.repairItemList.map((it: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-slate-50/50">
+                                <td className="py-2.5 px-4 text-center font-mono text-xs text-slate-400">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-2.5 px-4 font-medium text-slate-800">
+                                  {it.name || "-"}
+                                </td>
+                                <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">
+                                  {it.price ? `฿${Number(it.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold">
+                            <tr>
+                              <td colSpan={2} className="py-3 px-4 text-right text-slate-600 text-xs uppercase tracking-wider">
+                                ค่าใช้จ่ายรวม:
+                              </td>
+                              <td className="py-3 px-4 text-right text-base font-mono font-black text-blue-600">
+                                ฿{parseFloat(viewingLog.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-2xl flex items-center justify-between">
+                        <div className="text-sm font-medium text-slate-700">
+                          {viewingLog.repairItems || "ไม่ได้ระบุรายการซ่อม"}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs text-slate-400 block">ค่าใช้จ่ายรวม</span>
+                          <span className="text-base font-black font-mono text-blue-600">
+                            ฿{parseFloat(viewingLog.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Photos & PDF Attachments */}
+                  <div className="space-y-2.5">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>📷</span> รูปภาพและเอกสารแนบ
+                      {viewingLog.photos && viewingLog.photos.length > 0 && (
+                        <span className="text-xs font-bold text-slate-600">
+                          ({viewingLog.photos.length} ไฟล์)
+                        </span>
+                      )}
+                    </span>
+
+                    {viewingLog.photos && viewingLog.photos.length > 0 ? (
+                      <div className="flex flex-wrap gap-3">
+                        {viewingLog.photos.map((url: string, pIdx: number) => {
+                          const isPdf = isPdfUrl(url);
+                          return isPdf ? (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={() => window.open(url, "_blank")}
+                              className="w-24 h-24 rounded-2xl bg-rose-50 hover:bg-rose-100/80 border border-rose-200 text-rose-700 flex flex-col items-center justify-center p-2 transition-all hover:scale-105 shadow-2xs cursor-pointer group"
+                              title="คลิกเพื่อเปิดไฟล์ PDF ในแท็บใหม่"
+                            >
+                              <FileText size={30} className="text-rose-600 group-hover:scale-110 transition-transform" />
+                              <span className="text-[11px] font-bold font-mono mt-1 text-rose-700">เปิดดู PDF</span>
+                            </button>
+                          ) : (
+                            <div
+                              key={pIdx}
+                              onClick={() => openLightbox(viewingLog.photos, pIdx)}
+                              className="w-24 h-24 rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs cursor-pointer transition-all hover:scale-105 group relative"
+                              title="คลิกเพื่อดูรูปภาพขนาดเต็ม"
+                            >
+                              <img
+                                src={url}
+                                alt={`รูปงานซ่อมที่ ${pIdx + 1}`}
+                                className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                              />
+                              <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                <Search size={18} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-slate-50/60 border border-dashed border-slate-200 rounded-2xl text-center text-xs text-slate-400">
+                        ไม่มีรูปภาพหรือเอกสารแนบในรายการนี้
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 sm:px-8 py-4 border-t border-slate-100 bg-slate-50/70 flex justify-between items-center shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const logToEdit = viewingLog;
+                      setViewingLog(null);
+                      openModal(logToEdit);
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border border-blue-200/80 transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Pencil size={15} />
+                    <span>แก้ไขรายการนี้</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setViewingLog(null)}
+                    className="px-5 py-2 rounded-xl text-sm font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 shadow-xs transition-all cursor-pointer"
+                  >
+                    ปิดหน้าต่าง
+                  </button>
                 </div>
               </div>
             </div>,
@@ -4789,6 +5276,7 @@ export default function App() {
   const ProjectView = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProject, setEditingProject] = useState<Project | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
     const [formData, setFormData] = useState<ProjectFormData>({
       jobNo: "",
       name: "",
@@ -4847,220 +5335,416 @@ export default function App() {
       }
     };
 
+    // Filter projects based on search query
+    const filteredProjects = useMemo(() => {
+      if (!searchTerm.trim()) return projects;
+      const q = searchTerm.toLowerCase();
+      return projects.filter((p) => {
+        const name = (p.name || p.projectName || "").toLowerCase();
+        const jobNo = (p.jobNo || "").toLowerCase();
+        const loc = (p.location || "").toLowerCase();
+        const pm = (p.pm || "").toLowerCase();
+        const cm = (p.cm || "").toLowerCase();
+        return (
+          name.includes(q) ||
+          jobNo.includes(q) ||
+          loc.includes(q) ||
+          pm.includes(q) ||
+          cm.includes(q)
+        );
+      });
+    }, [projects, searchTerm]);
+
+    // KPI Metrics
+    const uniqueLocationsCount = useMemo(() => {
+      const locs = new Set(
+        projects
+          .map((p) => (p.location || "").trim())
+          .filter((l) => l && l !== "-")
+      );
+      return locs.size;
+    }, [projects]);
+
+    const assignedVehiclesCount = useMemo(() => {
+      return vehicles.filter((v) => getVehicleProjectIds(v).length > 0).length;
+    }, [vehicles]);
+
+    const getProjectVehicleCount = (projectId?: string) => {
+      if (!projectId) return 0;
+      return vehicles.filter((v) => getVehicleProjectIds(v).includes(projectId)).length;
+    };
+
     return (
-      <div className="space-y-8 p-2">
-        <div className="flex justify-between items-center">
-          <h2 className="text-3xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
-            <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600">
-              <Briefcase size={28} />
+      <div className="space-y-8 pb-8">
+        {/* Header with Title and Add Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-600 text-white flex items-center justify-center shadow-lg shadow-amber-500/25 shrink-0">
+              <Briefcase size={26} className="stroke-[2.2]" />
             </div>
-            ข้อมูลโครงการ
-          </h2>
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                ข้อมูลโครงการ
+              </h2>
+              <p className="text-sm text-slate-500 font-medium mt-1">
+                จัดการรายชื่อไซต์งาน ติดตามผู้รับผิดชอบ (PM/CM) และเครื่องจักรประจำโครงการ
+              </p>
+            </div>
+          </div>
+
           <button
             onClick={() => openModal()}
-            className="bg-blue-600 text-white px-6 py-3 rounded-xl flex items-center gap-2 hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all font-medium"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl font-bold text-sm text-white bg-gradient-to-r from-amber-500 via-amber-600 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-md shadow-amber-500/20 hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer shrink-0"
           >
-            <Plus size={20} /> เพิ่มโครงการ
+            <Plus size={19} className="stroke-[2.5]" />
+            <span>เพิ่มโครงการใหม่</span>
           </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {projects.map((p) => (
-            <Card
-              key={p.id}
-              className="p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group bg-gradient-to-br from-white to-amber-50/30 border border-amber-100 relative"
-            >
-              <div className="flex flex-col items-center text-center">
-                <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mb-3 border-2 border-white shadow">
-                  <Briefcase size={28} className="text-amber-600" />
-                </div>
-                <div className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-lg uppercase tracking-wide mb-2">
-                  {p.jobNo}
-                </div>
-                <h3 className="font-bold text-sm text-slate-900 mb-2 line-clamp-2 min-h-[2.5rem]" title={p.name || p.projectName}>
-                  {p.name || p.projectName}
-                </h3>
-                <div className="text-xs text-slate-500 flex items-center justify-center gap-1 mb-2 truncate w-full" title={p.location || "ไม่ได้ระบุ"}>
-                  <MapPin size={12} /> {p.location || "-"}
-                </div>
-                <div className="flex gap-3 text-xs border-t border-slate-100 pt-2 w-full justify-center">
-                  <div>
-                    <span className="text-slate-400 text-[10px] block uppercase font-semibold">PM</span>
-                    <span className="font-medium text-slate-700 truncate block max-w-[80px]" title={p.pm || "-"}>{p.pm || "-"}</span>
+
+        {/* 3 Metric Cards with Generous Spacing */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-md transition-all">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                โครงการทั้งหมด
+              </span>
+              <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center shrink-0">
+                <Briefcase size={20} />
+              </div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-3xl font-black font-mono text-slate-900">{projects.length}</span>
+              <span className="text-xs font-semibold text-slate-400">โครงการ</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-md transition-all">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                สถานที่ / ไซต์งาน
+              </span>
+              <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-200/60 text-sky-600 flex items-center justify-center shrink-0">
+                <MapPin size={20} />
+              </div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-3xl font-black font-mono text-slate-900">{uniqueLocationsCount}</span>
+              <span className="text-xs font-semibold text-slate-400">จุดปฏิบัติงาน</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-md transition-all">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                ยานพาหนะประจำโครงการ
+              </span>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-600 flex items-center justify-center shrink-0">
+                <Truck size={20} />
+              </div>
+            </div>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className="text-3xl font-black font-mono text-slate-900">{assignedVehiclesCount}</span>
+              <span className="text-xs font-semibold text-slate-400">คัน</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Search & Filter Toolbar */}
+        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          <div className="relative flex-1 max-w-lg">
+            <Search size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="ค้นหาชื่อโครงการ, Job No., สถานที่ หรือชื่อ PM/CM..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ paddingLeft: "2.8rem", paddingRight: "2.5rem" }}
+              className="w-full py-2.5 text-sm bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200/90 rounded-xl outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 transition-all text-slate-800 placeholder-slate-400"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                title="ล้างคำค้นหา"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs font-bold text-slate-500 flex items-center gap-2 self-end sm:self-center px-2">
+            <span>แสดง {filteredProjects.length} จากทั้งหมด {projects.length} โครงการ</span>
+          </div>
+        </div>
+
+        {/* Projects Cards Grid: Spacious 3-Column Layout */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-7">
+          {filteredProjects.map((p) => {
+            const vCount = getProjectVehicleCount(p.id);
+            return (
+              <div
+                key={p.id}
+                className="bg-white rounded-3xl border border-slate-200/90 hover:border-amber-400/90 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_32px_rgba(245,158,11,0.12)] transition-all duration-200 flex flex-col justify-between overflow-hidden group relative"
+              >
+                {/* Top Accent Strip */}
+                <div className="h-1.5 w-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+
+                <div className="p-6 sm:p-7 flex-1 flex flex-col justify-between space-y-5">
+                  {/* Card Header: Job No & Actions */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-xs bg-amber-50 text-amber-800 border border-amber-200/90 px-3 py-1 rounded-xl tracking-wide shadow-2xs">
+                        {p.jobNo || "ไม่ระบุ Job No"}
+                      </span>
+                      {vCount > 0 && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200/70 px-2.5 py-1 rounded-xl">
+                          <Truck size={12} /> {vCount} คัน
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => openModal(p)}
+                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer"
+                        title="แก้ไขข้อมูลโครงการ"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                      <button
+                        onClick={(e) => p.id && handleDelete(p.id, e)}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                        title="ลบโครงการ"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px] block uppercase font-semibold">CM</span>
-                    <span className="font-medium text-slate-700 truncate block max-w-[80px]" title={p.cm || "-"}>{p.cm || "-"}</span>
+
+                  {/* Project Title & Location with generous line-height */}
+                  <div className="space-y-2.5">
+                    <h3
+                      className="font-bold text-base sm:text-lg text-slate-900 group-hover:text-amber-700 transition-colors line-clamp-2 leading-relaxed"
+                      title={p.name || p.projectName}
+                    >
+                      {p.name || p.projectName || "-"}
+                    </h3>
+                    <div className="flex items-center gap-2 text-sm text-slate-500 pt-0.5">
+                      <MapPin size={15} className="text-amber-500 shrink-0" />
+                      <span className="truncate" title={p.location || "ไม่ได้ระบุสถานที่"}>
+                        {p.location || "ไม่ได้ระบุสถานที่"}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => openModal(p)}
-                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    onClick={(e) => p.id && handleDelete(p.id, e)}
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+
+                  {/* Personnel Info Box with ample padding */}
+                  <div className="bg-slate-50/70 border border-slate-100 rounded-2xl p-4.5 text-xs space-y-3.5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                          PM (Project Mgr.)
+                        </span>
+                        <span className="font-semibold text-slate-800 truncate block mt-1 text-sm" title={p.pm || "-"}>
+                          {p.pm || "-"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                          CM (Const. Mgr.)
+                        </span>
+                        <span className="font-semibold text-slate-800 truncate block mt-1 text-sm" title={p.cm || "-"}>
+                          {p.cm || "-"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {(p.machineRespName || p.machineRespPhone) && (
+                      <div className="pt-3 border-t border-slate-200/70 flex items-center justify-between text-xs text-slate-600">
+                        <span className="text-slate-400 font-medium">ดูแลเครื่องจักร:</span>
+                        <span className="font-semibold text-slate-700 truncate max-w-[160px]" title={`${p.machineRespName || ""} ${p.machineRespPhone || ""}`}>
+                          {p.machineRespName || "-"} {p.machineRespPhone ? `(${p.machineRespPhone})` : ""}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </Card>
-          ))}
-          {projects.length === 0 && (
-            <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200">
-              <Briefcase className="mx-auto h-12 w-12 text-slate-300 mb-4" />
-              <p className="text-slate-500 font-medium">ยังไม่มีข้อมูลโครงการ</p>
+            );
+          })}
+
+          {filteredProjects.length === 0 && (
+            <div className="col-span-full py-16 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-2">
+              <Briefcase size={36} className="text-slate-300" />
+              <p className="text-sm font-bold text-slate-600">ไม่พบข้อมูลโครงการที่ค้นหา</p>
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="text-xs text-amber-600 font-bold hover:underline cursor-pointer"
+                >
+                  ล้างคำค้นหา
+                </button>
+              )}
             </div>
           )}
         </div>
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[100] animate-fade-in backdrop-blur-sm">
-            <Card className="w-full max-w-lg shadow-2xl border-0">
-              <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white/95 backdrop-blur-md rounded-t-2xl">
-                <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-                  {editingProject ? (
-                    <>
-                      <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
-                        <Pencil size={24} />
-                      </div>{" "}
-                      แก้ไขโครงการ
-                    </>
-                  ) : (
-                    <>
-                      <div className="bg-green-100 p-2 rounded-lg text-green-600">
-                        <Plus size={24} />
-                      </div>{" "}
-                      เพิ่มโครงการใหม่
-                    </>
-                  )}
-                </h3>
-                <button
-                  onClick={() => setIsModalOpen(false)}
-                  className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition-colors"
+
+        {/* Modal: Add / Edit Project */}
+        {isModalOpen &&
+          createPortal(
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 md:p-8 pt-8 sm:pt-12 pb-8 sm:pb-12 z-[9999] animate-fade-in backdrop-blur-md overflow-y-auto">
+              <div className="bg-white border border-slate-200/90 text-slate-800 rounded-3xl w-full max-w-lg my-auto shadow-2xl flex flex-col overflow-hidden transition-all">
+                {/* Accent Top Bar */}
+                <div className="h-1.5 w-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 shrink-0" />
+
+                {/* Modal Header */}
+                <div
+                  style={{ paddingTop: "1.25rem", paddingBottom: "1.25rem" }}
+                  className="px-6 sm:px-7 border-b border-slate-100 flex justify-between items-center bg-white shrink-0"
                 >
-                  <X size={24} />
-                </button>
-              </div>
-              <div className="p-8 space-y-6">
-                <div>
-                  <label className="label">Job No.</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="เช่น JOB-67001"
-                    value={formData.jobNo}
-                    onChange={(e) =>
-                      setFormData({ ...formData, jobNo: e.target.value })
-                    }
-                    disabled={!!editingProject}
-                  />
-                </div>
-                <div>
-                  <label className="label">ชื่อโครงการ</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="ชื่อโครงการ"
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="label">สถานที่</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="จังหวัด / สถานที่ตั้ง"
-                    value={formData.location}
-                    onChange={(e) =>
-                      setFormData({ ...formData, location: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="label">Project Manager (PM)</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      value={formData.pm}
-                      onChange={(e) =>
-                        setFormData({ ...formData, pm: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label className="label">Const. Manager (CM)</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      value={formData.cm}
-                      onChange={(e) =>
-                        setFormData({ ...formData, cm: e.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="pt-4 border-t border-slate-100 mt-2">
-                  <h4 className="font-semibold text-slate-700 mb-3 text-sm">
-                    ผู้รับผิดชอบเครื่องจักร (Machine Resp.)
-                  </h4>
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-600 flex items-center justify-center shadow-xs shrink-0">
+                      {editingProject ? <Pencil size={18} /> : <Plus size={20} />}
+                    </div>
                     <div>
-                      <label className="label">ชื่อ (Name)</label>
+                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                        {editingProject ? "แก้ไขข้อมูลโครงการ" : "เพิ่มโครงการใหม่"}
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium">
+                        {editingProject ? `แก้ไขรายละเอียด ${editingProject.jobNo}` : "กรอกข้อมูลเพื่อสร้างโครงการใหม่ในระบบ"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                    title="ปิดหน้าต่าง"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                      Job No. <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                      placeholder="เช่น J-01, JOB-67001"
+                      value={formData.jobNo}
+                      onChange={(e) => setFormData({ ...formData, jobNo: e.target.value })}
+                      disabled={!!editingProject}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                      ชื่อโครงการ <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                      placeholder="เช่น GMTP building project"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                      สถานที่ / ไซต์งาน
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                      placeholder="เช่น ระยอง, ท่าเรือ, มาบตาพุด"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                        Project Manager (PM)
+                      </label>
                       <input
                         type="text"
-                        className="input-field"
-                        placeholder="ชื่อผู้รับผิดชอบ"
-                        value={formData.machineRespName}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            machineRespName: e.target.value,
-                          })
-                        }
+                        className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                        placeholder="ชื่อ PM"
+                        value={formData.pm}
+                        onChange={(e) => setFormData({ ...formData, pm: e.target.value })}
                       />
                     </div>
                     <div>
-                      <label className="label">เบอร์โทร (Phone)</label>
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                        Const. Manager (CM)
+                      </label>
                       <input
                         type="text"
-                        className="input-field"
-                        placeholder="เบอร์โทรศัพท์"
-                        value={formData.machineRespPhone}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            machineRespPhone: e.target.value,
-                          })
-                        }
+                        className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                        placeholder="ชื่อ CM"
+                        value={formData.cm}
+                        onChange={(e) => setFormData({ ...formData, cm: e.target.value })}
                       />
                     </div>
                   </div>
+
+                  <div className="pt-3 border-t border-slate-100">
+                    <span className="text-xs font-bold text-slate-600 mb-2.5 block">
+                      ผู้รับผิดชอบเครื่องจักร (Machine Resp.)
+                    </span>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">ชื่อผู้รับผิดชอบ</label>
+                        <input
+                          type="text"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                          placeholder="ชื่อ-สกุล"
+                          value={formData.machineRespName}
+                          onChange={(e) => setFormData({ ...formData, machineRespName: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-500 mb-1 block">เบอร์โทรศัพท์</label>
+                        <input
+                          type="text"
+                          className="input-field bg-slate-50/70 hover:bg-slate-50 focus:bg-white text-sm"
+                          placeholder="08X-XXX-XXXX"
+                          value={formData.machineRespPhone}
+                          onChange={(e) => setFormData({ ...formData, machineRespPhone: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-5 border-t border-slate-100 bg-slate-50/60 flex justify-end items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-200/70 transition-colors cursor-pointer"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveProject}
+                    className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md shadow-amber-600/20 transition-all cursor-pointer active:scale-95"
+                  >
+                    บันทึกข้อมูล
+                  </button>
                 </div>
               </div>
-              <div className="p-8 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-4 rounded-b-2xl">
-                <button
-                  onClick={() => setIsModalOpen(false)}
-                  className="btn-secondary"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={handleSaveProject}
-                  className="btn-primary shadow-lg shadow-blue-600/20"
-                >
-                  บันทึก
-                </button>
-              </div>
-            </Card>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
       </div>
     );
   };
